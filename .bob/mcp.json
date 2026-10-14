@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "watsonx-orchestrate-adk-docs": {
+      "command": "uvx",
+      "args": [
+        "mcp-proxy",
+        "--transport",
+        "streamablehttp",
+        "https://developer.watson-orchestrate.ibm.com/mcp"
+      ],
+      "timeout": 120000
+    },
+    "watsonx-orchestrate-adk": {
+      "command": "uvx",
+      "args": [
+        "ibm-watsonx-orchestrate-mcp-server"
+      ],
+      "env": {
+        "WXO_MCP_WORKING_DIRECTORY": "c:\\Users\\user\\AI IGNITION FOLDER\\team-powerpuffmen-agents",
+        "WXO_MCP_DEBUG": ""
+      },
+      "timeout": 120000
+    }
+  }
+}
