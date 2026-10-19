@@ -12,9 +12,9 @@ print("Market State:", quote_ctx.get_market_state())
 ret, data = quote_ctx.get_market_snapshot(["US.AAPL"])
 
 if ret == RET_OK:
-print(data)
+  print(data)
 else:
-print("Error fetching data:", data)
+  print("Error fetching data:", data)
 
 # 4. Always close the context when finished
 quote_ctx.close()
