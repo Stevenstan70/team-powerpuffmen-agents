@@ -1,0 +1,171 @@
+import re
+import sys
+import time
+
+import pandas as pd
+
+try:
+    import moomoo as ft
+except ImportError:
+    print("FAIL: moomoo is not installed in this Python environment.")
+    print("Python:", sys.executable)
+    sys.exit(1)
+
+HOST = "127.0.0.1"
+PORT = 11111
+SNAPSHOT_CHUNK = 400            # documented per-request limit
+SLEEP_BETWEEN = 0.6             # keep under 60 requests / 30 s
+OUTPUT_CSV = "us_market_full.csv"
+PROBE_CODE = "US.AAPL"
+
+# Exchange values containing any of these tokens are dropped up front
+# (only applies if basicinfo exposes an exchange-like column).
+EXCLUDE_EXCHANGE_TOKENS = ("OTC", "PINK", "GRAY")
+
+MAX_UNPARSEABLE_FAILURES = 25   # abort on errors we can't attribute to a single code
+MAX_REMOVALS = 5000             # safety ceiling on per-code removals
+
+NOT_AVAILABLE_RE = re.compile(r"not available for\s+([A-Za-z0-9._\-]+?)\.?\s*$")
+
+removed = []                    # (code, error message)
+request_count = 0
+unparseable_failures = 0
+
+
+def chunked(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def extract_bad_code(msg, codes):
+    """If the error names a single unavailable code that is in `codes`, return it."""
+    m = NOT_AVAILABLE_RE.search(msg)
+    if not m:
+        return None
+    token = m.group(1)
+    for c in codes:
+        if c == token or c == f"US.{token}" or c.endswith("." + token):
+            return c
+    return None
+
+
+def snapshot_chunk(ctx, codes):
+    """Snapshot a chunk. On 'not available for X' errors, drop X and retry.
+    On any other error, fall back to splitting the chunk."""
+    global request_count, unparseable_failures
+    codes = list(codes)
+    frames = []
+
+    while codes:
+        ret, data = ctx.get_market_snapshot(codes)
+        request_count += 1
+        time.sleep(SLEEP_BETWEEN)
+
+        if ret == ft.RET_OK:
+            frames.append(data)
+            break
+
+        msg = str(data)
+        bad = extract_bad_code(msg, codes)
+        if bad is not None:
+            codes.remove(bad)
+            removed.append((bad, msg))
+            if len(removed) % 50 == 0:
+                print(f"  removed {len(removed)} unavailable codes so far "
+                      f"(requests: {request_count})", flush=True)
+            if len(removed) > MAX_REMOVALS:
+                raise RuntimeError(f"More than {MAX_REMOVALS} unavailable codes; aborting.")
+            continue
+
+        unparseable_failures += 1
+        print(f"  request FAILED ({len(codes)} codes), unrecognised error: {msg[:300]}",
+              flush=True)
+        if unparseable_failures > MAX_UNPARSEABLE_FAILURES:
+            raise RuntimeError(
+                f"Aborting after {unparseable_failures} unrecognised failures; "
+                "this looks systemic (permissions, rate limit or connection)."
+            )
+        if len(codes) == 1:
+            removed.append((codes[0], msg))
+            break
+        mid = len(codes) // 2
+        frames += snapshot_chunk(ctx, codes[:mid])
+        frames += snapshot_chunk(ctx, codes[mid:])
+        break
+
+    return frames
+
+
+ctx = None
+try:
+    print(f"=== CONNECTING TO OPEND: {HOST}:{PORT} ===")
+    ctx = ft.OpenQuoteContext(host=HOST, port=PORT)
+
+    print(f"\n=== PROBE: snapshot of {PROBE_CODE} ===", flush=True)
+    t0 = time.time()
+    ret, probe = ctx.get_market_snapshot([PROBE_CODE])
+    print(f"  ret={ret} elapsed={time.time() - t0:.1f}s", flush=True)
+    if ret != ft.RET_OK:
+        raise RuntimeError(f"Probe failed on a known-good code: {probe}")
+
+    print("\n=== LISTING ALL US STOCKS ===")
+    ret, info = ctx.get_stock_basicinfo(
+        market=ft.Market.US,
+        stock_type=ft.SecurityType.STOCK,
+    )
+    if ret != ft.RET_OK:
+        raise RuntimeError(f"basicinfo failed: {info}")
+    print(f"basicinfo rows: {len(info)}")
+    print("basicinfo columns:", ", ".join(info.columns))
+
+    if "delisting" in info.columns:
+        before = len(info)
+        info = info[~info["delisting"].fillna(False).astype(bool)]
+        print(f"Dropped {before - len(info)} rows flagged as delisting.")
+
+    ex_col = next((c for c in info.columns if "exch" in c.lower()), None)
+    if ex_col:
+        print(f"\nExchange-like column '{ex_col}' values:")
+        print(info[ex_col].astype(str).value_counts().to_string())
+        up = info[ex_col].astype(str).str.upper()
+        mask = up.apply(lambda s: any(t in s for t in EXCLUDE_EXCHANGE_TOKENS))
+        print(f"Dropping {int(mask.sum())} rows on excluded exchanges.")
+        info = info[~mask]
+    else:
+        print("No exchange-like column found; relying on per-code removal of unavailable codes.")
+
+    codes = sorted(set(info["code"]))
+    n_chunks = -(-len(codes) // SNAPSHOT_CHUNK)
+    print(f"\n=== SNAPSHOTS: {len(codes)} codes in ~{n_chunks} chunks ===", flush=True)
+
+    frames = []
+    for i, chunk in enumerate(chunked(codes, SNAPSHOT_CHUNK), start=1):
+        t0 = time.time()
+        frames += snapshot_chunk(ctx, chunk)
+        print(f"  chunk {i}/{n_chunks} done in {time.time() - t0:.1f}s "
+              f"(requests: {request_count}, codes removed: {len(removed)})", flush=True)
+
+    if not frames:
+        raise RuntimeError("No snapshot data returned.")
+    snap = pd.concat(frames, ignore_index=True)
+
+    merged = snap.merge(info, on="code", how="left", suffixes=("", "_info"))
+    if "total_market_val" in merged.columns:
+        merged = merged.sort_values("total_market_val", ascending=False, na_position="last")
+    merged.to_csv(OUTPUT_CSV, index=False)
+
+    print(f"\nWrote {len(merged)} rows x {len(merged.columns)} columns to {OUTPUT_CSV}")
+    print(f"Codes with no snapshot: {len(set(codes) - set(snap['code']))}")
+
+    if removed:
+        pd.DataFrame(removed, columns=["code", "error"]).to_csv(
+            "us_market_removed_codes.csv", index=False
+        )
+        print(f"Wrote {len(removed)} removed codes to us_market_removed_codes.csv")
+
+except Exception as exc:
+    print(f"\nERROR: {type(exc).__name__}: {exc}")
+
+finally:
+    if ctx is not None:
+        ctx.close()
