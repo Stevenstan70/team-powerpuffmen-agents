@@ -113,6 +113,24 @@ def _clear_company_state():
     st.session_state["pending_approval"] = None
 
 
+def _load_demo_company(ticker: str):
+    """Select and evaluate an explicit demo before widgets render."""
+    _clear_company_state()
+    st.session_state["ticker_text_input"] = ticker
+    st.session_state["selected_ticker"] = ticker
+    result = evaluate_company(ticker, None, demo_override=ticker)
+    st.session_state["current_eval"] = result
+    st.session_state["resolved_company"] = {
+        "connected": False,
+        "found": not bool(result.get("error")),
+        "ticker": ticker,
+        "moomoo_code": None,
+        "company_name": result.get("company_name", ticker),
+        "sec_type": "DEMO",
+        "error": result.get("error"),
+    }
+
+
 def _eval_id(evaluation: dict) -> str:
     """Stable string identity for an evaluation (ticker + timestamp)."""
     return f"{evaluation.get('ticker','')}@{evaluation.get('data_timestamp','')}"
@@ -129,14 +147,15 @@ def _log_action(action: str, ticker: str, detail: dict | None = None):
 
 
 # ---------------------------------------------------------------------------
-# Global persistent warning
+# Global persistent notice
 # ---------------------------------------------------------------------------
-st.warning(
-    "⚠️ **SYNTHETIC DEMO DATA — PROTOTYPE** — No live market data or brokerage connection.  "
-    "Session-only state: data resets on page refresh.  "
-    "No AI agent is active unless labelled.",
+st.info(
+    "🔬 **PROTOTYPE** — Session-only state (resets on page refresh).  "
+    "No AI agent is active unless labelled.  "
+    "No trades are placed and no Moomoo watchlist is modified.",
     icon=None,
 )
+# Demo-mode warning is shown dynamically in the Screen tab when applicable.
 
 # ---------------------------------------------------------------------------
 # Title
@@ -204,22 +223,18 @@ with tab_screen:
         "**Demo shortcuts** — load a clearly-labelled fictional fixture without Moomoo:"
     )
     dc1, dc2, dc3, dc4 = st.columns(4)
-    if dc1.button("ACME — All PASS",    key="demo_acme"):
-        st.session_state["selected_ticker"] = "ACME"
-        _clear_company_state()
-        st.rerun()
-    if dc2.button("BLUE — OCF FAIL",    key="demo_blue"):
-        st.session_state["selected_ticker"] = "BLUE"
-        _clear_company_state()
-        st.rerun()
-    if dc3.button("CRST — UNKNOWN",     key="demo_crst"):
-        st.session_state["selected_ticker"] = "CRST"
-        _clear_company_state()
-        st.rerun()
-    if dc4.button("SMCHG — Sim Change", key="demo_smchg"):
-        st.session_state["selected_ticker"] = "SMCHG"
-        _clear_company_state()
-        st.rerun()
+    dc1.button("ACME — All PASS",    key="demo_acme",
+        on_click=_load_demo_company, args=("ACME",),
+    )
+    dc2.button("BLUE — OCF FAIL",    key="demo_blue",
+        on_click=_load_demo_company, args=("BLUE",),
+    )
+    dc3.button("CRST — UNKNOWN",     key="demo_crst",
+        on_click=_load_demo_company, args=("CRST",),
+    )
+    dc4.button("SMCHG — Sim Change", key="demo_smchg",
+        on_click=_load_demo_company, args=("SMCHG",),
+    )
 
     ticker = st.session_state["selected_ticker"]
 
@@ -301,13 +316,16 @@ with tab_screen:
                     }
                 else:
                     with st.spinner("Running screen…"):
-                        result = evaluate_company(ticker, fetch_result["inputs"])
-                    # Attach metadata from the resolve + fetch steps
-                    result["company_name"] = resolved_result["company_name"]
+                        result = evaluate_company(
+                            ticker,
+                            fetch_result["inputs"],
+                            source_mode="live",
+                            company_name=resolved_result["company_name"],
+                            data_timestamp=fetch_result["data_timestamp"],
+                        )
+                    # Attach supplementary metadata not returned by evaluate_company
                     result["moomoo_code"] = moomoo_code
                     result["input_notes"] = fetch_result["input_notes"]
-                    result["is_live"] = True
-                    result["mode"] = "live"
                     st.session_state["current_eval"] = result
         st.rerun()
 
