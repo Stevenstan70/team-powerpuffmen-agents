@@ -1,5 +1,5 @@
 """
-Powerpuffmen Research — Investment Screening & Monitoring Prototype.
+PPM Finance — Investment Screening & Monitoring Prototype.
 
 STATE: session-only (st.session_state).  Nothing persists across browser
 refreshes.  This limitation is labelled throughout the UI.
@@ -21,7 +21,12 @@ import sys
 import os
 import copy
 import datetime
+import html
+import math
+from typing import Any, TypedDict
 
+import altair as alt
+import pandas as pd
 import streamlit as st
 
 # ---------------------------------------------------------------------------
@@ -29,7 +34,7 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(__file__))
 
-from frontend.adapter import (
+from frontend.adapter import (  # pyright: ignore[reportImplicitRelativeImport]
     evaluate_company,
     analyse_company,
     check_for_changes,
@@ -47,14 +52,245 @@ _screen_fn = powerpuffmen_basic_screen.fn
 # Page config  (must be first Streamlit call)
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Powerpuffmen Research — Prototype",
+    page_title="PPM Finance — Investment Research",
     layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+st.markdown(
+    """
+    <style>
+    :root {
+        --ppm-bg: #0b1220;
+        --ppm-surface: #111c2e;
+        --ppm-surface-raised: #17243a;
+        --ppm-ink: #e6edf7;
+        --ppm-muted: #a0aec0;
+        --ppm-rule: #2b3b52;
+        --ppm-primary: #35b8ff;
+        --ppm-green: #35d07f;
+        --ppm-amber: #f2c66d;
+        --ppm-red: #ff7185;
+    }
+    html, body, [data-testid="stAppViewContainer"] {
+        background: var(--ppm-bg); color: var(--ppm-ink);
+    }
+    [data-testid="stHeader"] { background: var(--ppm-bg); }
+    [data-testid="stAppViewContainer"] [data-testid="stMarkdownContainer"] { color: var(--ppm-ink); }
+    .main .block-container { max-width: 1560px; padding: .65rem 2.5rem 4rem; }
+    .ppm-skip-link {
+        clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden;
+        position: fixed; left: 1rem; top: .5rem; white-space: nowrap; width: 1px; z-index: 2000;
+    }
+    .ppm-skip-link:focus {
+        background: #e6edf7; border-radius: 4px; clip: auto; clip-path: none;
+        color: #0b1220; height: auto; padding: .7rem 1rem; width: auto;
+    }
+    .ppm-masthead {
+        align-items: center; background: var(--ppm-bg); border-bottom: 1px solid var(--ppm-rule);
+        color: var(--ppm-ink);
+        display: flex; justify-content: space-between; gap: 1rem;
+        margin: 0 0 .5rem; padding: .85rem 0 1rem;
+    }
+    .ppm-brand { color: #f8fafc; font-size: 1.35rem; font-weight: 740; letter-spacing: -.03em; }
+    .ppm-tagline { color: var(--ppm-muted); font-size: .85rem; margin-top: .15rem; }
+    .ppm-env {
+        background: #172d2a; border: 1px solid #285845;
+        border-radius: 4px; color: #86e3b1; font-size: .7rem;
+        font-weight: 750; letter-spacing: .08em; padding: .45rem .7rem;
+        text-transform: uppercase; white-space: nowrap;
+    }
+    [data-testid="stTabs"] > div:first-child {
+        background: var(--ppm-bg); border-bottom: 1px solid var(--ppm-rule);
+    }
+    [data-testid="stTabs"] [role="tablist"] { gap: 1.1rem; overflow-x: auto; }
+    [data-testid="stTabs"] button[role="tab"] {
+        align-items: center;
+        background: transparent; border: 0; border-bottom: 2px solid transparent;
+        border-radius: 0; color: var(--ppm-muted); font-size: .9rem;
+        display: inline-flex; flex: 0 0 auto; font-weight: 620;
+        gap: .55rem; margin-right: 0;
+        min-height: 3rem; padding: .7rem .8rem; white-space: nowrap;
+    }
+    [data-testid="stTabs"] button[role="tab"]::before {
+        background-color: currentColor; content: "";
+        height: 1rem; width: 1rem; flex: 0 0 1rem;
+        -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; -webkit-mask-size: contain;
+        mask-position: center; mask-repeat: no-repeat; mask-size: contain;
+    }
+    [data-testid="stTabs"] button[role="tab"]:nth-child(1)::before {
+        -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10.8' cy='10.8' r='6.5'/%3E%3Cpath d='m16 16 4.5 4.5'/%3E%3C/svg%3E");
+        mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10.8' cy='10.8' r='6.5'/%3E%3Cpath d='m16 16 4.5 4.5'/%3E%3C/svg%3E");
+    }
+    [data-testid="stTabs"] button[role="tab"]:nth-child(2)::before {
+        -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='7' width='18' height='13' rx='2'/%3E%3Cpath d='M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18m-11 0v2h4v-2'/%3E%3C/svg%3E");
+        mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='7' width='18' height='13' rx='2'/%3E%3Cpath d='M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18m-11 0v2h4v-2'/%3E%3C/svg%3E");
+    }
+    [data-testid="stTabs"] button[role="tab"]:nth-child(3)::before {
+        -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E");
+        mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E");
+    }
+    [data-testid="stTabs"] button[role="tab"]:nth-child(4)::before {
+        -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 11v5m0-8h.01'/%3E%3C/svg%3E");
+        mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 11v5m0-8h.01'/%3E%3C/svg%3E");
+    }
+    [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+        background: transparent; border: 0; border-bottom: 2px solid var(--ppm-primary);
+        color: #f8fafc;
+    }
+    [data-testid="stTabs"] [data-baseweb="tab-highlight"] { display: none; }
+    [data-testid="stTabs"] button[role="tab"][aria-selected="false"]:hover {
+        background: var(--ppm-surface); color: #f8fafc;
+    }
+    [data-testid="stTabs"] [role="tabpanel"] {
+        margin-inline: auto; max-width: 1440px; width: 100%;
+    }
+    [data-testid="stButton"] button, [data-testid="stFormSubmitButton"] button {
+        background: var(--ppm-surface-raised); border: 1px solid var(--ppm-primary);
+        border-radius: 5px; color: var(--ppm-ink); font-weight: 650; min-height: 2.6rem;
+        transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    }
+    [data-testid="stButton"] button:hover, [data-testid="stFormSubmitButton"] button:hover {
+        border-color: var(--ppm-primary); color: #ffffff;
+    }
+    [data-testid="stFormSubmitButton"] button[kind="primary"],
+    [data-testid="stButton"] button[kind="primary"] {
+        background: var(--ppm-primary); border-color: var(--ppm-primary); color: var(--ppm-bg);
+        box-shadow: 0 1px 4px rgba(53, 184, 255, .2);
+    }
+    [data-testid="stFormSubmitButton"] button[kind="primary"]:hover,
+    [data-testid="stButton"] button[kind="primary"]:hover {
+        background: #e6edf7; border-color: #e6edf7; color: var(--ppm-bg);
+    }
+    [data-testid="stVerticalBlock"] { gap: .65rem; }
+    [data-testid="stButton"] button:not([kind="primary"]):hover {
+        background: var(--ppm-surface); border-color: var(--ppm-primary);
+    }
+    [data-testid="stTextInput"] div[data-baseweb="input"] {
+        background: #101a2a; border: 1px solid #3b4e68;
+        border-radius: 5px; box-shadow: none;
+    }
+    [data-testid="stTextInput"] div[data-baseweb="input"]:focus-within {
+        border-color: var(--ppm-primary);
+        box-shadow: 0 0 0 3px rgba(53, 184, 255, .18);
+    }
+    [data-testid="stTextInput"] input {
+        background: #101a2a; border-radius: 5px; color: var(--ppm-ink);
+        padding: .65rem .8rem;
+    }
+    [data-testid="stTextInput"] input::placeholder { color: #93a4b8; opacity: 1; }
+    [data-testid="stTextInput"] input { caret-color: var(--ppm-primary); }
+    [data-testid="stDataFrame"], [data-testid="stVerticalBlockBorderWrapper"] {
+        border: 1px solid var(--ppm-rule); border-radius: 5px;
+    }
+    [data-testid="stAlert"] {
+        background: #132033 !important; border: 1px solid var(--ppm-rule);
+        border-radius: 5px; color: var(--ppm-ink) !important; padding: .55rem .8rem;
+    }
+    [data-testid="stAlert"] [data-baseweb="notification"],
+    [data-testid="stAlert"] [role="alert"] {
+        background: #132033 !important; border: 0 !important; box-shadow: none !important;
+    }
+    [data-testid="stAlert"] [data-testid="stMarkdownContainer"],
+    [data-testid="stAlert"] [data-testid="stMarkdownContainer"] * {
+        color: var(--ppm-ink) !important;
+    }
+    [data-testid="stAlert"] [data-testid="stMarkdownContainer"] strong {
+        color: var(--ppm-amber) !important;
+    }
+    [data-testid="stExpander"] {
+        background: var(--ppm-surface); border: 1px solid var(--ppm-rule);
+        border-radius: 5px;
+    }
+    button:focus-visible, input:focus-visible, [role="tab"]:focus-visible {
+        outline: 3px solid rgba(53, 184, 255, .65) !important; outline-offset: 2px !important;
+    }
+    [data-testid="stDivider"] { color: var(--ppm-rule); }
+    [data-testid="stTextInput"] label, [data-testid="stSelectbox"] label { color: #d7e1ee !important; }
+    .ppm-screen-intro { margin: .8rem 0 .55rem; }
+    .ppm-screen-intro h1 {
+        color: #f8fafc; font-size: 1.7rem; font-weight: 680;
+        letter-spacing: -.035em; line-height: 1.15; margin: 0;
+    }
+    .ppm-screen-intro p { color: #a0aec0; font-size: .93rem; margin: .35rem 0 0; }
+    .ppm-company-line {
+        align-items: baseline; display: flex; flex-wrap: wrap; gap: .55rem;
+        margin: 1rem 0 .65rem;
+    }
+    .ppm-company-line strong { color: #f8fafc; font-size: 1.35rem; font-weight: 680; }
+    .ppm-company-line span { color: var(--ppm-muted); font-size: .9rem; }
+    .ppm-source-tag {
+        color: #86e3b1; font-size: .7rem; font-weight: 700;
+        letter-spacing: .07em; margin-left: auto; text-transform: uppercase;
+    }
+    .ppm-metric-grid {
+        background: var(--ppm-rule); border: 1px solid var(--ppm-rule);
+        display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1px; margin: 0 0 1.15rem;
+    }
+    .ppm-metric { background: var(--ppm-surface); min-width: 0; padding: .7rem .85rem; }
+    .ppm-metric-label {
+        color: var(--ppm-muted); font-size: .69rem; letter-spacing: .075em;
+        text-transform: uppercase;
+    }
+    .ppm-metric-value {
+        color: #f5f8fc; font-size: 1.25rem; font-variant-numeric: tabular-nums;
+        font-weight: 650; margin: .38rem 0 .2rem;
+    }
+    .ppm-metric-state { font-size: .72rem; font-weight: 650; }
+    .ppm-history-panel {
+        background: var(--ppm-surface); border: 1px solid var(--ppm-rule);
+        border-radius: 5px; margin: .2rem 0 1.15rem; padding: 1rem 1.15rem .8rem;
+    }
+    .ppm-history-heading {
+        align-items: center; display: flex; flex-wrap: wrap; gap: .8rem;
+        justify-content: space-between; margin-bottom: .3rem;
+    }
+    .ppm-history-heading strong { color: #f1f5fa; font-size: 1rem; font-weight: 650; }
+    .ppm-history-note { color: var(--ppm-muted); font-size: .78rem; }
+    .ppm-demo-tag {
+        color: var(--ppm-amber); font-size: .68rem; font-weight: 700;
+        letter-spacing: .055em;
+    }
+    .ppm-history-empty {
+        align-items: center; border-top: 1px solid var(--ppm-rule);
+        color: var(--ppm-muted); display: flex; min-height: 6.5rem;
+        padding: 1rem .2rem;
+    }
+    .ppm-history-table { border-collapse: collapse; font-size: .8rem; margin-top: .25rem; width: 100%; }
+    .ppm-history-table th {
+        border-bottom: 1px solid var(--ppm-rule); color: var(--ppm-muted);
+        font-size: .68rem; font-weight: 600; letter-spacing: .055em;
+        padding: .55rem .4rem; text-align: left; text-transform: uppercase;
+    }
+    .ppm-history-table td {
+        border-bottom: 1px solid #233349; color: #e6edf7;
+        font-variant-numeric: tabular-nums; padding: .7rem .4rem;
+    }
+    .ppm-history-table td:last-child { text-align: right; }
+    .ppm-criteria-title { color: #f1f5fa; font-size: 1rem; font-weight: 650; margin: .4rem 0 .75rem; }
+    .ppm-demo-label { color: var(--ppm-amber); font-size: .7rem; font-weight: 700; }
+    ::selection { background: rgba(53, 184, 255, .24); color: #ffffff; }
+    @media (max-width: 760px) {
+        .main .block-container { padding: .5rem 1rem 2.5rem; }
+        .ppm-masthead { align-items: flex-start; flex-direction: column; padding: .7rem 0 .85rem; }
+        .ppm-env { white-space: normal; }
+        .ppm-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        [data-testid="stVerticalBlock"] { gap: .55rem; }
+        [data-testid="stTabs"] button[role="tab"] { padding: .65rem .7rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
 # Session-state bootstrap
 # ---------------------------------------------------------------------------
-_DEFAULTS: dict = {
+_DEFAULTS: dict[str, Any] = {
     # Company selection
     "selected_ticker": "",
     # Validated + resolved company identity (cleared on ticker change)
@@ -89,20 +325,66 @@ for _k, _v in _DEFAULTS.items():
 # Constants / helpers
 # ---------------------------------------------------------------------------
 
-_STATUS_COLOURS = {"pass": "#1a7f37", "fail": "#cf222e", "unknown": "#9a6700"}
-_STATUS_ICONS   = {"pass": "✅ PASS",  "fail": "❌ FAIL",  "unknown": "⚠️ UNKNOWN"}
-_CHANGE_ICONS   = {
-    "status_transition":  "🔄",
-    "value_changed":      "📊",
-    "data_unavailable":   "❓",
-    "criteria_changed":   "⚙️",
+_STATUS_COLOURS = {"pass": "#35d07f", "fail": "#ff7185", "unknown": "#f2c66d"}
+_STATUS_LABELS = {"pass": "PASS", "fail": "FAIL", "unknown": "UNKNOWN"}
+_CHANGE_LABELS = {
+    "status_transition": "STATUS CHANGE",
+    "value_changed": "VALUE CHANGE",
+    "data_unavailable": "DATA UNAVAILABLE",
+    "criteria_changed": "CRITERIA UPDATE",
+}
+
+class _HistoryMetric(TypedDict):
+    label: str
+    criterion_id: str
+    divisor: float
+    axis_title: str
+    format: str
+
+
+_HISTORY_METRICS: dict[str, _HistoryMetric] = {
+    "market_cap_usd": {
+        "label": "Market capitalisation",
+        "criterion_id": "market_cap_range",
+        "divisor": 1_000_000_000,
+        "axis_title": "Market capitalisation (USD billions)",
+        "format": "$,.2f",
+    },
+    "close_price_usd": {
+        "label": "Closing share price",
+        "criterion_id": "min_close_price",
+        "divisor": 1,
+        "axis_title": "Closing share price (USD)",
+        "format": "$,.2f",
+    },
+    "operating_cash_flow_ttm_usd": {
+        "label": "Operating cash flow (TTM)",
+        "criterion_id": "positive_operating_cash_flow",
+        "divisor": 1_000_000,
+        "axis_title": "Operating cash flow (USD millions)",
+        "format": ",.1f",
+    },
+    "employee_count": {
+        "label": "Employee count",
+        "criterion_id": "min_employee_count",
+        "divisor": 1,
+        "axis_title": "Employees",
+        "format": ",.0f",
+    },
+}
+_DEMO_HISTORY_YEARS = (2021, 2022, 2023, 2024, 2025)
+_DEMO_HISTORY_FACTORS = {
+    "ACME": (0.58, 0.67, 0.78, 0.89, 1.0),
+    "BLUE": (0.78, 0.88, 0.76, 0.92, 1.0),
+    "CRST": (0.62, 0.73, 0.82, 0.91, 1.0),
+    "SMCHG": (0.65, 0.76, 0.84, 0.92, 1.0),
 }
 
 
 def _colour_status(status: str) -> str:
-    c = _STATUS_COLOURS.get(status, "#57606a")
-    icon = _STATUS_ICONS.get(status, status.upper())
-    return f'<span style="color:{c};font-weight:700;">{icon}</span>'
+    c = _STATUS_COLOURS.get(status, "#a0aec0")
+    label = _STATUS_LABELS.get(status, status.upper())
+    return f'<span style="color:{c};font-weight:700;">{label}</span>'
 
 
 def _clear_company_state():
@@ -113,12 +395,76 @@ def _clear_company_state():
     st.session_state["pending_approval"] = None
 
 
-def _eval_id(evaluation: dict) -> str:
+def _sync_ticker_input() -> None:
+    """Commit the ticker input before the next Streamlit script rerun."""
+    ticker = str(st.session_state.get("ticker_text_input", "")).strip().upper()
+    if ticker != st.session_state["selected_ticker"]:
+        st.session_state["selected_ticker"] = ticker
+        _clear_company_state()
+
+
+def _select_demo_ticker(ticker: str) -> None:
+    """Load a named demo fixture and keep the ticker input in sync."""
+    st.session_state["selected_ticker"] = ticker
+    st.session_state["ticker_text_input"] = ticker
+    _clear_company_state()
+    evaluation = evaluate_company(ticker, None, demo_override=ticker)
+    st.session_state["resolved_company"] = {
+        "connected": False,
+        "found": True,
+        "ticker": ticker,
+        "moomoo_code": None,
+        "company_name": evaluation.get("company_name", ticker),
+        "sec_type": "DEMO",
+        "error": None,
+    }
+    st.session_state["current_eval"] = evaluation
+    st.session_state["current_analysis"] = {
+        "connected": False,
+        "demo": True,
+        "content": _build_demo_research_brief(ticker, evaluation),
+        "error": None,
+    }
+
+
+def _build_demo_research_brief(ticker: str, evaluation: dict[str, Any]) -> str:
+    """Create a transparent rule-based sample brief from the selected fixture."""
+    criteria = evaluation.get("criteria", [])
+    if not criteria:
+        return "The demo fixture did not return screening criteria."
+
+    status_counts = {
+        status: sum(1 for criterion in criteria if criterion.get("status") == status)
+        for status in ("pass", "fail", "unknown")
+    }
+    lines = [
+        f"**{ticker} screening summary**",
+        (
+            f"{status_counts['pass']} criteria pass, "
+            f"{status_counts['fail']} fail, and "
+            f"{status_counts['unknown']} are unknown."
+        ),
+    ]
+    for criterion in criteria:
+        observed = criterion.get("observed_fmt") or "Unknown / unavailable"
+        lines.append(
+            f"- **{_STATUS_LABELS.get(criterion.get('status', 'unknown'), 'UNKNOWN')} · "
+            f"{criterion.get('label', 'Criterion')}** — observed {observed}; "
+            f"threshold: {criterion.get('threshold', 'not provided')}."
+        )
+    lines.append(
+        "This is a deterministic demonstration generated from the synthetic fixture, "
+        "not an AI or IBM watsonx Orchestrate response."
+    )
+    return "\n\n".join(lines)
+
+
+def _eval_id(evaluation: dict[str, Any]) -> str:
     """Stable string identity for an evaluation (ticker + timestamp)."""
     return f"{evaluation.get('ticker','')}@{evaluation.get('data_timestamp','')}"
 
 
-def _log_action(action: str, ticker: str, detail: dict | None = None):
+def _log_action(action: str, ticker: str, detail: dict[str, Any] | None = None):
     entry = {
         "action": action,
         "ticker": ticker,
@@ -128,29 +474,242 @@ def _log_action(action: str, ticker: str, detail: dict | None = None):
     st.session_state["action_log"].append(entry)
 
 
-# ---------------------------------------------------------------------------
-# Global persistent warning
-# ---------------------------------------------------------------------------
-st.warning(
-    "⚠️ **SYNTHETIC DEMO DATA — PROTOTYPE** — No live market data or brokerage connection.  "
-    "Session-only state: data resets on page refresh.  "
-    "No AI agent is active unless labelled.",
-    icon=None,
-)
+def _history_rows(
+    evaluation: dict[str, Any], ticker: str, metric_key: str
+) -> list[dict[str, int | float]]:
+    """Return verified live history or clearly synthetic demo points."""
+    metric = _HISTORY_METRICS[metric_key]
+    if evaluation.get("mode") == "demo":
+        criteria = evaluation.get("criteria", [])
+        criterion = next(
+            (item for item in criteria if item.get("id") == metric["criterion_id"]),
+            None,
+        )
+        observed = criterion.get("observed_value") if criterion else None
+        if not isinstance(observed, (int, float)) or isinstance(observed, bool):
+            return []
+        factors = _DEMO_HISTORY_FACTORS.get(ticker.upper())
+        if factors is None:
+            return []
+        return [
+            {
+                "year": year,
+                "value": int(round(observed * factor))
+                if metric_key == "employee_count"
+                else observed * factor / metric["divisor"],
+            }
+            for year, factor in zip(_DEMO_HISTORY_YEARS, factors)
+        ]
+
+    historical_data = evaluation.get("historical_data")
+    if not isinstance(historical_data, dict):
+        return []
+    series = historical_data.get(metric_key)
+    if not isinstance(series, list):
+        return []
+    rows: list[dict[str, int | float]] = []
+    for point in series:
+        if not isinstance(point, dict):
+            continue
+        year = point.get("year")
+        value = point.get("value")
+        if (
+            isinstance(year, int)
+            and not isinstance(year, bool)
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        ):
+            if metric_key == "employee_count":
+                if not float(value).is_integer():
+                    continue
+                value = int(value)
+                scaled_value: int | float = value
+            else:
+                scaled_value = value / metric["divisor"]
+            rows.append({"year": year, "value": scaled_value})
+    return rows
+
+
+def _format_history_value(value: int | float, metric_key: str) -> str:
+    if metric_key == "employee_count":
+        return f"{int(value):,}"
+    if metric_key == "market_cap_usd":
+        return f"${value:,.2f}B"
+    if metric_key == "operating_cash_flow_ttm_usd":
+        return f"${value:,.1f}M"
+    return f"${value:,.2f}"
+
+
+def _render_metric_strip(evaluation: dict[str, Any]) -> None:
+    criteria = {item.get("id"): item for item in evaluation.get("criteria", [])}
+    cards: list[str] = []
+    for metric_key, metric in _HISTORY_METRICS.items():
+        criterion = criteria.get(metric["criterion_id"], {})
+        status = str(criterion.get("status", "unknown")).lower()
+        status_color = _STATUS_COLOURS.get(status, _STATUS_COLOURS["unknown"])
+        observed = criterion.get("observed_fmt")
+        value = observed if observed is not None else "Unknown"
+        cards.append(
+            '<div class="ppm-metric">'
+            f'<div class="ppm-metric-label">{html.escape(metric["label"])}</div>'
+            f'<div class="ppm-metric-value">{html.escape(str(value))}</div>'
+            f'<div class="ppm-metric-state" style="color:{status_color}">'
+            f'{html.escape(_STATUS_LABELS.get(status, "UNKNOWN"))}'
+            '</div></div>'
+        )
+    st.markdown(
+        f'<div class="ppm-metric-grid">{"".join(cards)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_history_empty_state() -> None:
+    st.markdown(
+        '<div class="ppm-history-heading">'
+        '<strong>Historical Comparison</strong>'
+        '<span class="ppm-history-note">Annual view · one screening metric</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    chart_col, controls_col = st.columns([2.2, 1], gap="large")
+    with controls_col:
+        st.selectbox(
+            "Y-axis metric",
+            options=list(_HISTORY_METRICS),
+            format_func=lambda key: f"{_HISTORY_METRICS[key]['label']} · {key}",
+            key="history_metric",
+        )
+    with chart_col:
+        st.markdown(
+            '<div class="ppm-history-empty">'
+            'Run a screen or choose a demo fixture to load the annual comparison.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def _render_historical_comparison(evaluation: dict[str, Any], ticker: str) -> None:
+    is_demo = evaluation.get("mode") == "demo"
+    provenance = "SYNTHETIC · DEMO ONLY" if is_demo else "SOURCE-PROVIDED HISTORY"
+    provenance_class = "ppm-demo-tag" if is_demo else "ppm-history-note"
+    st.markdown(
+        '<div class="ppm-history-heading">'
+        '<div><strong>Historical Comparison</strong>'
+        f'<div class="ppm-history-note">{html.escape(ticker)} · annual metric series</div></div>'
+        f'<span class="{provenance_class}">'
+        f'{"SYNTHETIC DEMO SERIES · NOT ACTUAL HISTORY" if is_demo else provenance}</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    chart_col, metric_col = st.columns([2.2, 1], gap="large")
+    with metric_col:
+        metric_key = st.selectbox(
+            "Y-axis metric",
+            options=list(_HISTORY_METRICS),
+            format_func=lambda key: f"{_HISTORY_METRICS[key]['label']} · {key}",
+            key="history_metric",
+        )
+    metric = _HISTORY_METRICS[metric_key]
+    rows = _history_rows(evaluation, ticker, metric_key)
+
+    with chart_col:
+        if not rows:
+            message = (
+                "This fixture has no value for the selected metric; no annual sample is generated."
+                if is_demo
+                else "Annual history is unavailable. Moomoo currently supplies snapshot and profile data, not verified annual series."
+            )
+            st.markdown(
+                f'<div class="ppm-history-empty">{html.escape(message)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            frame = pd.DataFrame(rows)
+            x_axis = alt.X("year:O", title="Year", axis=alt.Axis(labelAngle=0))
+            y_axis = alt.Y(
+                "value:Q",
+                title=metric["axis_title"],
+                axis=alt.Axis(
+                    format=metric["format"],
+                    grid=True,
+                    gridDash=[3, 4],
+                    gridOpacity=0.62,
+                    gridWidth=0.8,
+                ),
+                scale=alt.Scale(zero=False),
+            )
+            tooltip = [
+                alt.Tooltip("year:O", title="Year"),
+                alt.Tooltip("value:Q", title=metric["label"], format=metric["format"]),
+            ]
+            chart = (
+                alt.layer(
+                    alt.Chart(frame).mark_area(color="#35b8ff", opacity=0.12),
+                    alt.Chart(frame).mark_line(
+                        color="#35b8ff",
+                        point=alt.OverlayMarkDef(filled=True, color="#35b8ff", size=68),
+                        strokeWidth=2.5,
+                    ),
+                )
+                .encode(x=x_axis, y=y_axis, tooltip=tooltip)
+                .properties(height=245)
+                .configure_view(stroke=None)
+                .configure_axis(
+                    labelColor="#b8c6d8",
+                    titleColor="#e6edf7",
+                    gridColor="#52647d",
+                    domainColor="#52647d",
+                    tickColor="#52647d",
+                )
+                .configure_title(color="#e6edf7")
+            )
+            st.altair_chart(chart, width="stretch")
+            st.caption(
+                "Synthetic demo values are illustrative, not reported company history."
+                if is_demo
+                else "Annual values shown only when provided by a verified source."
+            )
+    with metric_col:
+        if rows:
+            history_table_rows = "".join(
+                "<tr>"
+                f"<td>{row['year']}</td>"
+                f"<td>{html.escape(_format_history_value(row['value'], metric_key))}</td>"
+                "</tr>"
+                for row in rows[-3:]
+            )
+            st.markdown(
+                '<table class="ppm-history-table">'
+                '<thead><tr><th>Year</th><th>Value</th></tr></thead>'
+                f"<tbody>{history_table_rows}</tbody></table>",
+                unsafe_allow_html=True,
+            )
+
 
 # ---------------------------------------------------------------------------
-# Title
+# Global header and primary navigation
 # ---------------------------------------------------------------------------
-st.title("Powerpuffmen Research — Screening & Monitoring Prototype")
+st.markdown(
+    """
+    <a class="ppm-skip-link" href="#main-content">Skip to main content</a>
+    <header class="ppm-masthead">
+      <div><div class="ppm-brand">PPM Finance</div>
+      <div class="ppm-tagline">Investment research, screening &amp; monitoring</div></div>
+      <div class="ppm-env">PROTOTYPE · SYNTHETIC DEMO DATA</div>
+    </header>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
 tab_screen, tab_track, tab_approve, tab_about = st.tabs([
-    "🔍 Screen",
-    "📋 Tracked Companies",
-    "✅ Approval",
-    "ℹ️ About / Demo",
+    "Screen",
+    "Tracked Companies",
+    "Approval",
+    "About / Demo",
 ])
 
 
@@ -159,77 +718,73 @@ tab_screen, tab_track, tab_approve, tab_about = st.tabs([
 # ===========================================================================
 
 with tab_screen:
-
-    # ── Moomoo handoff notice ────────────────────────────────────────────────
-    with st.expander("ℹ️ How to use this screen", expanded=False):
-        st.markdown(
-            """
-**Workflow:**
-
-1. Enter a single ticker symbol below (e.g. `AAPL`).
-2. Press **▶ Analyse** — the app validates the ticker, resolves the company
-   name via Moomoo, retrieves available financial data automatically, and
-   runs the screening criteria.
-3. Review results. A company heading is only shown after the ticker has
-   been verified by Moomoo — unverified input is never displayed as a
-   company name.
-
-**What is retrieved automatically:**
-- Close price and market cap — via Moomoo `get_market_snapshot`
-- Employee count — via Moomoo `get_company_profile`
-- **Operating cash flow TTM** — _not yet connected_
-  (requires backend teammate's `get_financials_statements` field-ID parser)
-
-**Demo shortcuts** load clearly-labelled demo fixtures without hitting Moomoo.
-            """
-        )
+    st.markdown('<div id="main-content" tabindex="-1"></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="ppm-screen-intro">'
+        '<h1>Screen a company</h1>'
+        '<p>Apply clear, rules-based criteria and inspect the evidence behind each result.</p>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    st.warning(
+        "**SYNTHETIC DEMO DATA — PROTOTYPE.** Demo shortcuts use synthetic fixtures. "
+        "Live Moomoo data appears only when the connection is available. "
+        "Tracking is session-only; AI analysis and brokerage trading are not connected.",
+        icon=None,
+    )
 
     # ── Ticker input ─────────────────────────────────────────────────────────
-    ticker_input = st.text_input(
-        "Ticker symbol",
-        value=st.session_state["selected_ticker"],
-        placeholder="e.g. AAPL",
-        key="ticker_text_input",
-        help="Enter a single ticker symbol. Multi-word input like 'baba amskd' will be rejected.",
-    ).strip().upper()
-
-    # Detect ticker change → clear stale state immediately
-    if ticker_input != st.session_state["selected_ticker"]:
-        st.session_state["selected_ticker"] = ticker_input
-        _clear_company_state()
-        st.rerun()
+    ticker_col, analyse_col = st.columns([4, 1], gap="medium", vertical_alignment="bottom")
+    with ticker_col:
+        ticker_input = (
+            st.text_input(
+            "Ticker symbol",
+            placeholder="e.g. AAPL",
+            key="ticker_text_input",
+            on_change=_sync_ticker_input,
+            help="Enter a single ticker symbol. Multi-word input like 'baba amskd' will be rejected.",
+        )
+            or ""
+        ).strip().upper()
+    with analyse_col:
+        with st.form("analyse_form", border=False):
+            analyse_pressed = st.form_submit_button(
+                "Analyse",
+                type="primary",
+                use_container_width=True,
+                help="Validate ticker, resolve company, fetch data, and run the screen.",
+            )
 
     # ── Demo company shortcuts ────────────────────────────────────────────────
     st.caption(
-        "**Demo shortcuts** — load a clearly-labelled fictional fixture without Moomoo:"
+        "**Quick demo screens** · fictional fixtures; no Moomoo connection required"
     )
     dc1, dc2, dc3, dc4 = st.columns(4)
-    if dc1.button("ACME — All PASS",    key="demo_acme"):
-        st.session_state["selected_ticker"] = "ACME"
-        _clear_company_state()
-        st.rerun()
-    if dc2.button("BLUE — OCF FAIL",    key="demo_blue"):
-        st.session_state["selected_ticker"] = "BLUE"
-        _clear_company_state()
-        st.rerun()
-    if dc3.button("CRST — UNKNOWN",     key="demo_crst"):
-        st.session_state["selected_ticker"] = "CRST"
-        _clear_company_state()
-        st.rerun()
-    if dc4.button("SMCHG — Sim Change", key="demo_smchg"):
-        st.session_state["selected_ticker"] = "SMCHG"
-        _clear_company_state()
-        st.rerun()
+    dc1.button(
+        "ACME — All PASS", key="demo_acme", width="stretch",
+        on_click=_select_demo_ticker, args=("ACME",),
+    )
+    dc2.button(
+        "BLUE — OCF FAIL", key="demo_blue", width="stretch",
+        on_click=_select_demo_ticker, args=("BLUE",),
+    )
+    dc3.button(
+        "CRST — UNKNOWN", key="demo_crst", width="stretch",
+        on_click=_select_demo_ticker, args=("CRST",),
+    )
+    dc4.button(
+        "SMCHG — Sim Change", key="demo_smchg", width="stretch",
+        on_click=_select_demo_ticker, args=("SMCHG",),
+    )
 
     ticker = st.session_state["selected_ticker"]
 
     if not ticker:
         st.caption("Aggregate status: — (run the screen to see results)")
         st.caption("Rule-based summary — AI agent not connected")
-        st.info(
-            "Enter a ticker above or pick a demo shortcut to begin.  "
-            "Press **▶ Analyse** after entering a ticker."
-        )
+        st.info("Enter a ticker above. Press **Analyse** or choose a quick demo screen.")
+        with st.container(border=True):
+            _render_history_empty_state()
         st.stop()
 
     # ── Inline ticker format validation (no network call) ────────────────────
@@ -239,21 +794,13 @@ with tab_screen:
     if not _is_demo:
         _val = validate_ticker(ticker)
         if not _val["valid"]:
-            st.error(f"❌ **Invalid ticker:** {_val['reason']}")
+            st.error(f"**Invalid ticker:** {_val['reason']}")
             st.caption("Aggregate status: — (run the screen to see results)")
             st.caption("Rule-based summary — AI agent not connected")
             st.stop()
 
-    # ── Analyse button (single entry point for live flow) ────────────────────
-    with st.form("analyse_form"):
-        analyse_pressed = st.form_submit_button(
-            "▶ Analyse",
-            type="primary",
-            help="Validate ticker, resolve company, fetch data, and run the screen.",
-        )
-
-    current_eval: dict | None = st.session_state["current_eval"]
-    resolved: dict | None = st.session_state["resolved_company"]
+    current_eval: dict[str, Any] | None = st.session_state["current_eval"]
+    resolved: dict[str, Any] | None = st.session_state["resolved_company"]
 
     if analyse_pressed:
         st.session_state["current_analysis"] = None
@@ -314,20 +861,15 @@ with tab_screen:
     resolved = st.session_state["resolved_company"]
     current_eval = st.session_state["current_eval"]
 
-    st.divider()
-
     # ── Company heading — only shown after Moomoo verification ───────────────
     if resolved and resolved.get("found"):
         cname = resolved.get("company_name") or ticker
         sec = resolved.get("sec_type", "")
         code = resolved.get("moomoo_code") or ticker
-        mode_badge = "🔵 DEMO" if _is_demo else "🟢 Live"
-        st.subheader(f"{cname}  ({code})")
-        st.caption(f"Type: {sec}  |  Mode: {mode_badge}")
     elif resolved and not resolved.get("found") and resolved.get("connected"):
         # Moomoo connected but ticker not found — show error, not the raw ticker
         st.error(
-            f"❌ **Ticker '{ticker}' not found in Moomoo.** "
+            f"**Ticker '{ticker}' not found in Moomoo.** "
             f"{resolved.get('error', '')}"
         )
         st.caption("Aggregate status: — (run the screen to see results)")
@@ -335,7 +877,7 @@ with tab_screen:
         st.stop()
     elif resolved and not resolved.get("connected"):
         st.warning(
-            f"⚠️ **Moomoo not connected.** {resolved.get('error', '')}  "
+            f"**Moomoo not connected.** {resolved.get('error', '')}  "
             "Results cannot be retrieved automatically."
         )
         st.caption("Aggregate status: — (run the screen to see results)")
@@ -343,28 +885,49 @@ with tab_screen:
         st.stop()
     else:
         # No analysis run yet for this ticker
-        st.subheader(ticker)
+        cname = ticker
+        code = ticker
+        sec = "Awaiting screen"
+
+    if current_eval and current_eval.get("ticker") == ticker and not current_eval.get("error"):
+        aggregate = _STATUS_LABELS.get(
+            current_eval.get("aggregate_status", "unknown"),
+            current_eval.get("aggregate_status", "unknown").upper(),
+        )
+        status_color = _STATUS_COLOURS.get(
+            current_eval.get("aggregate_status", "unknown"),
+            _STATUS_COLOURS["unknown"],
+        )
+        source_label = f"{'DEMO FIXTURE' if _is_demo else 'LIVE SCREEN'} · {aggregate}"
+        st.markdown(
+            '<div class="ppm-company-line">'
+            f'<strong>{html.escape(cname)}</strong>'
+            f'<span>({html.escape(code)}) · {html.escape(str(sec))}</span>'
+            f'<span class="ppm-source-tag" style="color:{status_color}">'
+            f'{html.escape(source_label)}</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            f"Data as of {current_eval.get('data_timestamp', '—')} · "
+            f"{current_eval.get('currency', 'USD')} · {aggregate}"
+        )
+        _render_metric_strip(current_eval)
+        with st.container(border=True):
+            _render_historical_comparison(current_eval, ticker)
+    else:
+        st.markdown(
+            '<div class="ppm-company-line">'
+            f'<strong>{html.escape(cname)}</strong>'
+            f'<span>({html.escape(code)}) · {html.escape(str(sec))}</span>'
+            '<span class="ppm-source-tag">SCREEN NOT RUN</span></div>',
+            unsafe_allow_html=True,
+        )
         st.caption("Aggregate status: — (run the screen to see results)")
+        with st.container(border=True):
+            _render_history_empty_state()
 
     # ── Aggregate status banner ───────────────────────────────────────────────
-    if current_eval and current_eval.get("ticker") == ticker and not current_eval.get("error"):
-        meta_col, status_col = st.columns([3, 1])
-        with meta_col:
-            st.markdown(f"**Company:** {current_eval.get('company_name', ticker)}")
-            st.markdown(f"**Currency:** {current_eval.get('currency', 'USD')}")
-            ts = current_eval.get("data_timestamp", "—")
-            is_live = current_eval.get("is_live", False)
-            mode_label = "🟢 Live" if is_live else "🔵 Demo"
-            st.markdown(f"**Data as of:** {ts}  |  **Mode:** {mode_label}")
-        with status_col:
-            agg = current_eval.get("aggregate_status", "unknown")
-            c = _STATUS_COLOURS.get(agg, "#57606a")
-            icon = _STATUS_ICONS.get(agg, agg.upper())
-            st.markdown(
-                f'<p style="font-size:1.3em;font-weight:700;color:{c};">{icon}</p>',
-                unsafe_allow_html=True,
-            )
-    elif current_eval and current_eval.get("error"):
+    if current_eval and current_eval.get("error"):
         st.error(f"**Retrieval error:** {current_eval['error']}")
         # Show which inputs were and were not connected
         notes = current_eval.get("input_notes", {})
@@ -394,24 +957,55 @@ with tab_screen:
                         "Observed": c["observed_fmt"],
                         "Threshold": c["threshold"],
                         "Unit": c["unit"],
-                        "Status": _STATUS_ICONS.get(c["status"], c["status"].upper()),
+                        "Status": _STATUS_LABELS.get(c["status"], c["status"].upper()),
                     })
 
                 st.markdown("#### Criteria results")
-                st.dataframe(table_rows, hide_index=True, use_container_width=True)
+                criteria_frame = pd.DataFrame(table_rows)
+                status_styles = {
+                    "PASS": "color: #35d07f; font-weight: 700;",
+                    "FAIL": "color: #ff7185; font-weight: 700;",
+                    "UNKNOWN": "color: #f2c66d; font-weight: 700;",
+                }
+                st.dataframe(
+                    criteria_frame.style.map(
+                        lambda value: status_styles.get(value, ""),
+                        subset=["Status"],
+                    ).set_table_styles([
+                        {
+                            "selector": "th",
+                            "props": [
+                                ("border-top", "0"),
+                                ("border-left", "0"),
+                                ("border-right", "0"),
+                                ("border-bottom", "1px solid #2b3b52"),
+                            ],
+                        },
+                        {
+                            "selector": "td",
+                            "props": [
+                                ("border-top", "0"),
+                                ("border-left", "0"),
+                                ("border-right", "0"),
+                                ("border-bottom", "1px solid #2b3b52"),
+                            ],
+                        },
+                    ]),
+                    hide_index=True,
+                    width="stretch",
+                )
 
                 # Show data-source notes for live runs
                 notes = current_eval.get("input_notes", {})
                 if notes and current_eval.get("is_live"):
                     with st.expander("Data sources", expanded=False):
                         for field, note in notes.items():
-                            icon = "✅" if "Moomoo" in note else "⚠️"
-                            st.caption(f"{icon} **{field}:** {note}")
+                            st.caption(f"**{field}:** {note}")
 
                 with st.expander("Criterion explanations", expanded=False):
                     for c in criteria:
-                        icon = {"pass": "✅", "fail": "❌", "unknown": "⚠️"}.get(c["status"], "")
-                        st.markdown(f"**{icon} {c['label']}** ({c['reporting_period']})")
+                        status = _STATUS_LABELS.get(c["status"], c["status"].upper())
+                        st.markdown(f"**{status} · {c['label']}** ({c['reporting_period']})")
                         obs = c["observed_fmt"] if c["observed_value"] is not None else "Unknown / Unavailable"
                         st.markdown(
                             f"&nbsp;&nbsp;&nbsp;Observed: `{obs}`  "
@@ -420,40 +1014,58 @@ with tab_screen:
                         st.markdown("---")
 
                 st.info(
-                    "⚠️ Only the criteria returned by the screening tool were evaluated. "
+                    "Only the criteria returned by the screening tool were evaluated. "
                     "Not full investment eligibility or an investment recommendation."
                 )
 
                 # Demo label
                 if not current_eval.get("is_live"):
                     st.warning(
-                        "🔵 **DEMO DATA** — These results are demo fixtures, "
+                        "**DEMO DATA** — These results are synthetic fixtures, "
                         "not real market data.",
                         icon=None,
                     )
 
     # ── RIGHT: analysis + save ─────────────────────────────────────────────
     with right_col:
-        st.markdown("#### Agent Analysis")
-        # Note: 'analyse_pressed' here is a separate button from the form submit above
+        st.markdown("#### Research brief")
+        is_demo_evaluation = bool(current_eval and current_eval.get("mode") == "demo")
         agent_analyse_pressed = st.button(
-            "🤖 Request agent analysis",
+            "Show demo research brief" if is_demo_evaluation else "Request agent analysis",
             key="agent_analyse_btn",
+            type="primary" if is_demo_evaluation else "secondary",
             disabled=(current_eval is None or current_eval.get("ticker") != ticker or bool(current_eval.get("error"))),
         )
 
         if agent_analyse_pressed and current_eval:
-            with st.spinner("Requesting analysis…"):
-                analysis_result = analyse_company(ticker, current_eval)
+            if is_demo_evaluation:
+                analysis_result = {
+                    "connected": False,
+                    "demo": True,
+                    "content": _build_demo_research_brief(ticker, current_eval),
+                    "error": None,
+                }
+            else:
+                with st.spinner("Requesting analysis…"):
+                    analysis_result = analyse_company(ticker, current_eval)
             st.session_state["current_analysis"] = analysis_result
             st.rerun()
 
-        analysis: dict | None = st.session_state["current_analysis"]
+        analysis: dict[str, Any] | None = st.session_state["current_analysis"]
         if analysis is None:
             if current_eval and current_eval.get("ticker") == ticker:
-                st.caption("Press **Analyse company** to request an AI agent analysis.")
+                if is_demo_evaluation:
+                    st.caption(
+                        "Show a sample brief based on the fixture's screening results. "
+                        "It is not generated by an AI agent."
+                    )
+                else:
+                    st.caption("Request a response from the configured AI agent.")
             else:
                 st.caption("Run the screen first, then request analysis.")
+        elif analysis.get("demo"):
+            st.caption("DEMO OUTPUT · RULE-BASED SAMPLE · NOT AN AGENT RESPONSE")
+            st.markdown(analysis.get("content", ""))
         elif not analysis.get("connected"):
             st.error(f"**Analysis not connected.** {analysis.get('error','')}")
             st.caption(
@@ -468,10 +1080,11 @@ with tab_screen:
         st.divider()
 
         # ── Save baseline ────────────────────────────────────────────────────
-        st.markdown("#### Save for Monitoring")
+        st.markdown("#### Save for monitoring")
         save_pressed = st.button(
-            "📌 Save company for monitoring",
+            "Save company for monitoring",
             key="save_btn",
+            type="primary",
             disabled=(current_eval is None or current_eval.get("ticker") != ticker or bool(current_eval.get("error"))),
         )
 
@@ -485,41 +1098,46 @@ with tab_screen:
                 st.session_state["qualified_list"].add(ticker)
             _log_action("saved_baseline", ticker)
             st.success(f"**{ticker}** saved to Tracked Companies.")
-            st.caption("⚠️ Session-only — this is not persisted beyond the current browser session.")
+            st.caption("Session-only — this is not persisted beyond the current browser session.")
 
         if ticker in st.session_state["tracked"]:
             saved_at = st.session_state["tracked"][ticker]["saved_at"]
-            st.caption(f"✅ Already tracked — baseline saved at {saved_at}.")
+            st.caption(f"Already tracked — baseline saved at {saved_at}.")
 
         st.divider()
 
         # ── Research summary (rule-based, no AI) ─────────────────────────────
-        st.markdown("#### Rule-based Research Summary")
-        st.caption("Rule-based summary — AI agent not connected")
-
         if current_eval and current_eval.get("ticker") == ticker and not current_eval.get("error"):
             agg = current_eval.get("aggregate_status", "unknown")
-            agg_label = _STATUS_ICONS.get(agg, agg.upper())
+            agg_label = _STATUS_LABELS.get(agg, agg.upper())
             cname = current_eval.get("company_name", ticker)
             lines = [f"**Screen result for {cname}: {agg_label}**\n"]
             for c in current_eval.get("criteria", []):
                 obs = c["observed_fmt"] if c["observed_value"] is not None else "Unknown"
-                icon = {"pass": "✅", "fail": "❌", "unknown": "⚠️"}.get(c["status"], "")
+                status = _STATUS_LABELS.get(c["status"], c["status"].upper())
                 lines.append(
-                    f"{icon} **{c['label']}** — Observed: {obs}; "
+                    f"**{status} · {c['label']}** — Observed: {obs}; "
                     f"Threshold: {c['threshold']}"
                 )
             lines.append("")
             lines.append(f"*{current_eval.get('scope_note', '')}*")
-            st.markdown("\n\n".join(lines))
-            st.markdown("---")
-            st.markdown(
-                "_This summary is a deterministic explanation of the criteria results "
-                "above. No news, valuations, price history, or forecasts are generated. "
-                "No AI model was consulted._"
-            )
+            with st.container(border=True):
+                summary_title, summary_status = st.columns([3, 1])
+                summary_title.markdown("#### Rule-based Research Summary")
+                summary_status.markdown(
+                    f'<div style="text-align:right;padding-top:.35rem">'
+                    f'{_colour_status(agg.lower())}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption("AI agent not connected · deterministic criteria explanation")
+                st.markdown("\n\n".join(lines))
+                st.caption(
+                    "No news, valuations, price history, or forecasts are generated. "
+                    "No AI model was consulted."
+                )
         else:
-            st.markdown("_Press **▶ Run basic screen** to generate the rule-based summary._")
+            st.markdown("#### Rule-based Research Summary")
+            st.caption("AI agent not connected · Press **Analyse** to show the criteria summary.")
 
 
 # ===========================================================================
@@ -529,13 +1147,13 @@ with tab_screen:
 with tab_track:
     st.subheader("Tracked Companies")
     st.caption(
-        "⚠️ **Session-only** — tracked companies are stored in browser session state "
+        "**Session-only** — tracked companies are stored in browser session state "
         "and are lost on page refresh.  No database or scheduler is connected."
     )
 
-    tracked: dict = st.session_state["tracked"]
-    qualified: set = st.session_state["qualified_list"]
-    needs_review: set = st.session_state["needs_review_list"]
+    tracked: dict[str, Any] = st.session_state["tracked"]
+    qualified: set[str] = st.session_state["qualified_list"]
+    needs_review: set[str] = st.session_state["needs_review_list"]
 
     if not tracked:
         st.info(
@@ -549,7 +1167,7 @@ with tab_track:
             is_qualified = ticker_t in qualified
             is_review = ticker_t in needs_review
             list_label = "Qualified" if is_qualified else ("Needs Review" if is_review else "—")
-            list_colour = "#1a7f37" if is_qualified else ("#cf222e" if is_review else "#57606a")
+            list_colour = "#35d07f" if is_qualified else ("#ff7185" if is_review else "#a0aec0")
 
             with st.expander(
                 f"**{ticker_t}** — {baseline_eval.get('company_name', ticker_t)} | "
@@ -560,11 +1178,18 @@ with tab_track:
                 # Baseline summary
                 bm_col, bl_col = st.columns([2, 1])
                 with bm_col:
-                    st.markdown(f"**Baseline aggregate:** {_STATUS_ICONS.get(baseline_eval.get('aggregate_status','unknown'), '—')}")
+                    baseline_status = baseline_eval.get("aggregate_status", "unknown")
+                    st.markdown(
+                        f"**Baseline aggregate:** {_colour_status(str(baseline_status).lower())}",
+                        unsafe_allow_html=True,
+                    )
                     for c in baseline_eval.get("criteria", []):
                         obs = c["observed_fmt"] if c["observed_value"] is not None else "Unknown"
-                        icon = {"pass": "✅", "fail": "❌", "unknown": "⚠️"}.get(c["status"], "")
-                        st.markdown(f"- {icon} **{c['label']}**: {obs}")
+                        status = str(c["status"]).lower()
+                        st.markdown(
+                            f"- {_colour_status(status)} · **{c['label']}**: {obs}",
+                            unsafe_allow_html=True,
+                        )
                 with bl_col:
                     st.markdown(
                         f'<span style="color:{list_colour};font-weight:700;">'
@@ -572,7 +1197,7 @@ with tab_track:
                         unsafe_allow_html=True,
                     )
                     if not baseline_eval.get("is_live"):
-                        st.caption("🔵 Baseline data is DEMO")
+                        st.caption("Baseline data is synthetic demo data.")
 
                 st.divider()
 
@@ -584,8 +1209,9 @@ with tab_track:
                 )
 
                 check_pressed = st.button(
-                    f"🔄 Check for changes — {ticker_t}",
+                    f"Check for changes — {ticker_t}",
                     key=f"check_{ticker_t}",
+                    type="primary",
                 )
 
                 check_key = f"change_result_{ticker_t}"
@@ -603,16 +1229,16 @@ with tab_track:
                     if cr["error"]:
                         st.error(f"Change check error: {cr['error']}")
                     elif not cr["comparable"]:
-                        st.warning(f"⚙️ **Not directly comparable:** {cr['not_comparable_reason']}")
+                        st.warning(f"**Not directly comparable:** {cr['not_comparable_reason']}")
                     else:
                         changes = cr["changes"]
                         if not changes:
                             st.success("No changes detected since baseline.")
                         else:
                             for ch in changes:
-                                icon = _CHANGE_ICONS.get(ch["change_type"], "📌")
+                                label = _CHANGE_LABELS.get(ch["change_type"], "CHANGE")
                                 st.markdown(
-                                    f"{icon} **{ch['criterion_label']}** — "
+                                    f"**{label} · {ch['criterion_label']}** — "
                                     f"{ch['explanation']}"
                                 )
                                 dc1, dc2 = st.columns(2)
@@ -622,7 +1248,7 @@ with tab_track:
                                 # If a pass→fail transition, offer approval workflow
                                 if ch["change_type"] == "status_transition" and ch["new_status"] == "fail":
                                     st.warning(
-                                        f"⚠️ Pass → Fail detected on **{ch['criterion_label']}**.  "
+                                        f"Pass → Fail detected on **{ch['criterion_label']}**.  "
                                         "Go to the **Approval** tab to review."
                                     )
                                     pending = {
@@ -632,14 +1258,14 @@ with tab_track:
                                         "proposed_action": "move_to_needs_review",
                                     }
                                     if st.button(
-                                        f"➡ Queue for approval — {ticker_t}",
+                                        f"Queue for approval — {ticker_t}",
                                         key=f"queue_{ticker_t}_{ch['criterion_id']}",
                                     ):
                                         st.session_state["pending_approval"] = pending
                                         st.success("Queued.  Review in the **Approval** tab.")
 
                 # Remove from tracking
-                if st.button(f"🗑 Remove {ticker_t} from tracking", key=f"remove_{ticker_t}"):
+                if st.button(f"Remove {ticker_t} from tracking", key=f"remove_{ticker_t}"):
                     del st.session_state["tracked"][ticker_t]
                     st.session_state["qualified_list"].discard(ticker_t)
                     st.session_state["needs_review_list"].discard(ticker_t)
@@ -681,7 +1307,7 @@ with tab_approve:
             new_eval = p_cr.get("new_evaluation", {})
             if _eval_id(new_eval) != p_eval_id:
                 st.warning(
-                    "⚠️ The evaluation that triggered this approval has changed.  "
+                    "The evaluation that triggered this approval has changed.  "
                     "Pending approval invalidated.  Please re-check for changes."
                 )
                 st.session_state["pending_approval"] = None
@@ -702,26 +1328,26 @@ with tab_approve:
                             r1.metric("Old value", ch["old_value_fmt"])
                             r2.metric("New value", ch["new_value_fmt"])
                             st.markdown(
-                                f"**Old status:** {_STATUS_ICONS.get(ch['old_status'], ch['old_status'].upper())}  "
-                                f"→  **New status:** {_STATUS_ICONS.get(ch['new_status'], ch['new_status'].upper())}"
+                                f"**Old status:** {_STATUS_LABELS.get(ch['old_status'], ch['old_status'].upper())}  "
+                                f"→  **New status:** {_STATUS_LABELS.get(ch['new_status'], ch['new_status'].upper())}"
                             )
                             st.markdown(f"**Explanation:** {ch['explanation']}")
                             b_ts = tracked_entry["saved_at"]
                             n_ts = p_cr.get("checked_at", "—")
                             st.caption(f"Baseline saved: {b_ts}  |  Change detected: {n_ts}")
                             if not new_eval.get("is_live"):
-                                st.caption("🔵 New evaluation is DEMO data")
+                                st.caption("New evaluation uses synthetic demo data.")
 
                 st.divider()
                 ap_col, kc_col = st.columns(2)
 
                 approve_pressed = ap_col.button(
-                    "✅ Approve — move to Needs Review",
+                    "Approve — move to Needs Review",
                     type="primary",
                     key="approve_btn",
                 )
                 keep_pressed = kc_col.button(
-                    "❌ Keep current list status",
+                    "Keep current list status",
                     key="keep_btn",
                 )
 
@@ -770,7 +1396,7 @@ with tab_approve:
                 "Action": entry["action"],
                 "Ticker": entry["ticker"],
             })
-        st.dataframe(log_rows, hide_index=True, use_container_width=True)
+        st.dataframe(log_rows, hide_index=True, width="stretch")
 
 
 # ===========================================================================
@@ -809,7 +1435,7 @@ The **SMCHG** ticker also powers the **Simulated-change scenario** below.
     st.divider()
 
     # ── Simulated-change scenario ─────────────────────────────────────────────
-    st.subheader("🔵 Simulated-change Scenario (DEMO only)")
+    st.subheader("Simulated-change Scenario (DEMO only)")
     st.markdown(
         """
 This scenario demonstrates a **pass→fail transition** without using live data.
@@ -834,25 +1460,25 @@ No live data is read or written at any step.
         sim_base = st.session_state["sim_baseline"]
         sim_chg  = st.session_state["sim_changed"]
 
-        st.success("🔵 Demo baseline loaded.")
+        st.success("Demo baseline loaded.")
         b_col, c_col = st.columns(2)
 
         with b_col:
             st.markdown("**Baseline evaluation (all PASS):**")
             for c in sim_base["criteria"]:
-                icon = {"pass":"✅","fail":"❌","unknown":"⚠️"}.get(c["status"],"")
-                st.markdown(f"- {icon} {c['label']}: {c['observed_fmt']}")
+                status = _STATUS_LABELS.get(c["status"], c["status"].upper())
+                st.markdown(f"- **{status}** · {c['label']}: {c['observed_fmt']}")
 
         with c_col:
             st.markdown("**Changed evaluation (OCF FAIL):**")
             for c in sim_chg["criteria"]:
-                icon = {"pass":"✅","fail":"❌","unknown":"⚠️"}.get(c["status"],"")
-                st.markdown(f"- {icon} {c['label']}: {c['observed_fmt']}")
+                status = _STATUS_LABELS.get(c["status"], c["status"].upper())
+                st.markdown(f"- **{status}** · {c['label']}: {c['observed_fmt']}")
 
         run_sim_check = st.button("Run change comparison", key="sim_compare")
         if run_sim_check:
             # Manually build a change result from the two evals
-            from frontend.adapter import check_for_changes as _cfc
+            _cfc = check_for_changes
             fake_entry = {"saved_at": sim_base["data_timestamp"], "evaluation": sim_base}
 
             # We override the "new" eval by mocking check_for_changes internals
@@ -908,9 +1534,9 @@ No live data is read or written at any step.
         sim_cr = st.session_state.get("sim_check_result", {})
         st.markdown(f"**Comparison result** _(DEMO — simulated, not real data)_:")
         for ch in sim_cr.get("changes", []):
-            icon = _CHANGE_ICONS.get(ch["change_type"], "📌")
-            st.markdown(f"{icon} **{ch['criterion_label']}** — {ch['explanation']}")
+            label = _CHANGE_LABELS.get(ch["change_type"], "CHANGE")
+            st.markdown(f"**{label} · {ch['criterion_label']}** — {ch['explanation']}")
         st.info(
-            "🔵 This is a simulated-change scenario.  No live data was read.  "
+            "This is a simulated-change scenario.  No live data was read.  "
             "No write operations were performed."
         )

@@ -83,7 +83,7 @@ _DEMO_BTN_KEY = {
 
 # Form submit button key (must match app.py)
 # AppTest exposes st.form_submit_button as at.button with label matching
-_RUN_BTN_LABEL = "▶ Run basic screen"
+_RUN_BTN_LABEL = "Analyse"
 
 
 # ---------------------------------------------------------------------------
@@ -151,9 +151,16 @@ class TestAppInitialRender(unittest.TestCase):
     def test_title_present(self):
         titles = [t.value for t in self.at.title]
         self.assertTrue(
-            any("Powerpuffmen Research" in t for t in titles),
-            f"Title not found. Titles: {titles}",
+            "PPM Finance" in _all_text(self.at),
+            f"PPM Finance masthead not found. Titles: {titles}",
         )
+
+    def test_research_sheet_header_and_empty_comparison_are_visible(self):
+        text = _all_text(self.at)
+        self.assertIn("Investment research, screening &amp; monitoring", text)
+        self.assertIn("Screen a company", text)
+        self.assertIn("Historical Comparison", text)
+        self.assertIn("history_metric", {select.key for select in self.at.selectbox})
 
     def test_synthetic_data_warning_always_visible(self):
         """The persistent demo-data warning must be visible at all times.
@@ -182,8 +189,18 @@ class TestAppInitialRender(unittest.TestCase):
         self.assertIn("demo_crst", btn_keys,
                       f"Demo CRST button missing. Keys: {btn_keys}")
 
+    def test_demo_shortcut_loads_screen_and_sample_brief(self):
+        self.at.button(key="demo_blue").click().run()
+        self.assertFalse(self.at.exception, f"App raised: {self.at.exception}")
+        text = _all_text(self.at)
+        self.assertIn("Bluebird Ventures", text)
+        self.assertIn("Positive Operating Cash Flow", text)
+        self.assertIn("DEMO OUTPUT", text)
+        self.assertIn("not an AI or IBM watsonx Orchestrate response", text)
+        self.assertEqual(self.at.text_input(key="ticker_text_input").value, "BLUE")
+
     def test_run_button_present_after_ticker_selected(self):
-        """'▶ Run basic screen' form-submit appears once a ticker is set.
+        """The Analyse form-submit appears once a ticker is set.
 
         Old assertion: button[0] label contains "Run basic screen".
         New assertion: after selecting a ticker via text_input, the
@@ -195,11 +212,11 @@ class TestAppInitialRender(unittest.TestCase):
         self.assertGreater(
             len(at.form_submit_button),
             0,
-            "form_submit_button (▶ Run basic screen) missing after ticker set.",
+            "Analyse form-submit missing after ticker set.",
         )
 
     def test_prompt_to_run_shown_before_first_run(self):
-        """Before a screen is run, a 'Press ▶ Run basic screen' prompt appears.
+        """Before a screen is run, a prompt to Analyse appears.
 
         Old assertion: "Press" in all_text on initial render (no ticker set).
         New assertion: same — the info box shown when no ticker is entered
@@ -253,6 +270,22 @@ class TestAcmeAllPass(unittest.TestCase):
 
     def test_no_exception(self):
         self.assertFalse(self.at.exception, f"App raised: {self.at.exception}")
+
+    def test_historical_chart_metric_selector(self):
+        selector = self.at.selectbox(key="history_metric")
+        expected_metrics = {
+            "market_cap_usd",
+            "close_price_usd",
+            "operating_cash_flow_ttm_usd",
+            "employee_count",
+        }
+        self.assertEqual(len(selector.options), len(expected_metrics))
+        self.assertTrue(
+            all(any(metric in option for option in selector.options) for metric in expected_metrics)
+        )
+        self.assertEqual(len(self.at.get("vega_lite_chart")), 1)
+        self.assertEqual(len(self.at.get("dataframe")), 1)
+        self.assertIn("SYNTHETIC DEMO SERIES", _all_text(self.at))
 
     def test_pass_aggregate_in_banner(self):
         """PASS aggregate status appears in the banner.
@@ -448,6 +481,13 @@ class TestCrstEmployeeUnknown(unittest.TestCase):
     def test_no_exception(self):
         self.assertFalse(self.at.exception, f"App raised: {self.at.exception}")
 
+    def test_missing_employee_history_stays_unknown(self):
+        self.at.selectbox(key="history_metric").set_value("employee_count").run()
+        self.assertTrue(
+            "no annual sample is generated" in _all_text(self.at).lower(),
+            "Unknown employee count must not be rendered as a zero-valued history.",
+        )
+
     def test_unknown_aggregate_in_banner(self):
         """UNKNOWN aggregate status appears in the banner.
 
@@ -523,11 +563,11 @@ class TestCrstEmployeeUnknown(unittest.TestCase):
         self.assertIn("UNKNOWN", text)
         # If the only "bad" criterion is missing data, aggregate must not show pure FAIL
         # (CRST fixture: three PASS + one UNKNOWN → aggregate UNKNOWN)
-        # Check the aggregate banner does not show ❌ FAIL
+        # Check the aggregate banner does not show FAIL.
         self.assertNotIn(
-            "❌ FAIL",
+            "FAIL",
             text,
-            "Aggregate with only missing data must not show ❌ FAIL.",
+            "Aggregate with only missing data must not show FAIL.",
         )
 
 
@@ -749,31 +789,18 @@ class TestAnalysisNotConnected(unittest.TestCase):
             f"Agent analyse button (key=agent_analyse_btn) missing. Keys: {keys}",
         )
 
-    def test_clicking_analyse_shows_error_not_fabricated_output(self):
-        """Clicking the agent analysis button shows an honest 'not connected' error.
-        No fabricated agent output is displayed.
-        """
+    def test_demo_click_shows_labeled_sample_brief_not_agent_output(self):
+        """A demo shortcut loads an explicitly rule-based sample brief."""
         at = AppTest.from_file(APP_PATH, default_timeout=30)
         at.run()
-        _run_screen(at, _TICKER_PASS)
-        # Use key to find the correct button (not the ▶ Analyse form submit)
+        at.button(key="demo_acme").click().run()
         agent_btns = [b for b in at.button if b.key == "agent_analyse_btn"]
         if not agent_btns:
-            self.skipTest("agent_analyse_btn button not found")
+            self.fail("Demo brief button not available after selecting a demo fixture.")
         agent_btns[0].click().run()
         self.assertFalse(at.exception, f"Exception: {at.exception}")
-        # Must show an error (st.error) — not a success with fake content
-        errors = [e.value for e in at.error]
-        self.assertTrue(
-            any("Analysis not connected" in e or "not connected" in e.lower() for e in errors),
-            f"Expected 'not connected' error after clicking agent analysis. Errors: {errors}",
-        )
-        # Must NOT claim to have agent output
-        successes = [s.value for s in at.success]
-        self.assertFalse(
-            any("Agent analysis" in s and "live agent output" in s for s in successes),
-            "App must not show fabricated agent output when not connected.",
-        )
+        self.assertIn("DEMO OUTPUT", _all_text(at))
+        self.assertIn("not an AI or IBM watsonx Orchestrate response", _all_text(at))
 
 
 class TestCriteriaTableColumnNames(unittest.TestCase):
@@ -810,10 +837,10 @@ class TestCriteriaTableColumnNames(unittest.TestCase):
             self.assertIsInstance(val, str)
             self.assertGreater(len(val), 0)
 
-    def test_status_column_contains_icons(self):
-        """Status column values include PASS/FAIL/UNKNOWN icons."""
+    def test_status_column_contains_plain_labels(self):
+        """Status column values use clear PASS/FAIL/UNKNOWN labels."""
         self.assertIn("Status", self.df.columns)
-        valid_statuses = {"✅ PASS", "❌ FAIL", "⚠️ UNKNOWN"}
+        valid_statuses = {"PASS", "FAIL", "UNKNOWN"}
         for val in self.df["Status"]:
             self.assertIn(val, valid_statuses,
                           f"Unexpected status value: {val!r}")

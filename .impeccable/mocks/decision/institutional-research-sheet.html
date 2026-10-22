@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PPM Finance — Institutional Research Sheet</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#dce6f3;font:14px/1.45 "Segoe UI",Arial,sans-serif}
+.shell{width:1440px;height:900px;overflow:hidden;padding:24px 48px;background:#0b1220}
+header{display:flex;align-items:center;gap:34px;border-bottom:1px solid #2b3b52;padding:4px 0 18px}
+.brand{font-size:21px;font-weight:750;color:#f7f9fc}.sub{font-size:11px;color:#90a1b7;margin-top:3px}
+nav{display:flex;gap:24px;margin-left:26px;color:#9fb0c5}nav b{color:#e7f0fb;border-bottom:2px solid #32b6ff;padding:18px 0}
+.badge{margin-left:auto;color:#9bdbbd;border:1px solid #28533f;border-radius:4px;padding:7px 10px;font-size:10px;letter-spacing:.08em}
+.row{display:flex;align-items:center;gap:18px;margin:25px 0 18px}.symbol{font-size:22px;font-weight:700;color:#fff}.muted{color:#8ea0b8}.source{margin-left:auto;color:#7de2ad;font-size:11px}
+button,select{background:#142237;border:1px solid #30435c;color:#e4edf8;border-radius:5px;padding:9px 12px;font:inherit}button.primary{background:#087db5;border-color:#1596d0;color:white;font-weight:700}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#2a3a50;border:1px solid #2a3a50;margin-bottom:19px}
+.metric{background:#111c2e;padding:13px 16px}.label{font-size:10px;letter-spacing:.09em;color:#8ea0b8;text-transform:uppercase}.value{font-size:21px;font-weight:650;color:#f5f8fc;margin-top:7px}.state{font-size:10px;color:#77d9a5;margin-top:4px}
+.panel{background:#111c2e;border:1px solid #26364c;border-radius:6px;padding:17px 19px}.panelhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}.paneltitle{font-size:15px;font-weight:650;color:#f1f5fa}.tag{font-size:10px;color:#f2c66c;letter-spacing:.06em}
+.chartwrap{display:grid;grid-template-columns:1.7fr 1fr;gap:18px}.chart{height:205px;position:relative;border-bottom:1px solid #35465c;background:repeating-linear-gradient(to bottom,transparent 0,transparent 48px,#26364a 49px,#26364a 50px)}
+.chart svg{position:absolute;inset:0;width:100%;height:100%}.years{display:flex;justify-content:space-between;color:#91a1b5;font-size:10px;padding-top:8px}
+.axis{position:absolute;left:0;top:5px;color:#96a6ba;font-size:10px}.readout{display:flex;gap:24px;margin-top:14px;color:#9babc0;font-size:11px}.readout strong{color:#e8f0f9}
+table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;color:#91a3b9;font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:11px;border-bottom:1px solid #304158}td{padding:12px 11px;border-bottom:1px solid #233349}td:last-child{text-align:right;font-variant-numeric:tabular-nums;color:#f1f5fa}.pass{color:#65d49a}
+.footer{margin-top:12px;color:#8799b0;font-size:10px}
+</style>
+<body><main class="shell">
+<header><div><div class="brand">PPM Finance</div><div class="sub">Investment research, screening &amp; monitoring</div></div><nav><b>Screen</b><span>Tracked Companies</span><span>Approval</span><span>About / Demo</span></nav><div class="badge">PROTOTYPE · SYNTHETIC DEMO DATA</div></header>
+<div class="row"><div class="symbol">ACME <span class="muted">/ Acme Galactic Ltd</span></div><button>Change ticker</button><button class="primary">Analyse</button><div class="source">DEMO FIXTURE · ALL PASS</div></div>
+<section class="metrics"><div class="metric"><div class="label">Market capitalisation</div><div class="value">$15.0B</div><div class="state">PASS · USD</div></div><div class="metric"><div class="label">Closing price</div><div class="value">$42.50</div><div class="state">PASS · USD / share</div></div><div class="metric"><div class="label">Operating cash flow · TTM</div><div class="value">$850M</div><div class="state">PASS · USD</div></div><div class="metric"><div class="label">Employees</div><div class="value">3,200</div><div class="state">PASS · people</div></div></section>
+<section class="panel"><div class="panelhead"><div><div class="paneltitle">Historical Comparison</div><div class="muted" style="font-size:11px;margin-top:3px">ACME · annual series shown for demonstration</div></div><div class="tag">SYNTHETIC · NOT ACTUAL HISTORY</div></div>
+<div class="chartwrap"><div><div class="chart"><span class="axis">Market cap · USD billions</span><svg viewBox="0 0 720 205" preserveAspectRatio="none" aria-label="Synthetic demo market capitalization trend"><path d="M25 163 L195 136 L365 111 L535 85 L695 55" fill="none" stroke="#36baff" stroke-width="3"/><g fill="#36baff"><circle cx="25" cy="163" r="4"/><circle cx="195" cy="136" r="4"/><circle cx="365" cy="111" r="4"/><circle cx="535" cy="85" r="4"/><circle cx="695" cy="55" r="4"/></g></svg></div><div class="years"><span>2021</span><span>2022</span><span>2023</span><span>2024</span><span>2025</span></div><div class="readout"><span>2021 <strong>$10.0B</strong></span><span>2025 <strong>$15.0B</strong></span><span>Source <strong>Demo fixture</strong></span></div></div><div><label class="label" for="metric">Metric</label><br><select id="metric" style="width:100%;margin:7px 0 12px"><option>Market cap · USD</option><option>Closing price · USD/share</option><option>Operating cash flow · USD</option><option>Employees · people</option></select><table><thead><tr><th>Year</th><th>Value</th></tr></thead><tbody><tr><td>2023</td><td>$12.7B</td></tr><tr><td>2024</td><td>$14.3B</td></tr><tr><td>2025</td><td>$15.0B</td></tr></tbody></table></div></div><div class="footer">Synthetic annual values derived for demo illustration; not reported company history. Live historical series are unavailable until a verified source is connected.</div></section>
+<p class="footer">Criteria are rules-based. Demo data is fictional; no brokerage actions or recommendations are made.</p>
+</main></body></html>
