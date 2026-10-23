@@ -3,3 +3,4 @@ altair
 numpy
 pandas
 ibm-watsonx-orchestrate
+moomoo-api
