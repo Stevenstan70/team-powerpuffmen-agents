@@ -38,3 +38,4 @@ td.wrap{white-space:normal;min-width:260px;line-height:1.6}
 .price-chart .key.sma150{background:#c79a45}
 .price-chart .key.sma200{background:#6d7f9a}
 h3.sub{font-size:13px;margin:22px 0 8px}
+.card .table-wrap td,.card .table-wrap th{white-space:normal}

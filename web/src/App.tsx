@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ResearchResult } from "./api";
 import ResearchView from "./ResearchView";
 import ScreenerView from "./ScreenerView";
 import StatusView from "./StatusView";
@@ -23,12 +24,13 @@ const HEADING: Record<Tab, { title: string; blurb: string }> = {
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("Screener");
-  const [researchTicker, setResearchTicker] = useState("AAPL");
+  const [opened, setOpened] = useState<ResearchResult | null>(null);
   const h = HEADING[tab];
 
-  function openResearch(ticker: string) {
-    setResearchTicker(ticker);
+  function openResearch(result: ResearchResult) {
+    setOpened(result);
     setTab("Research");
+    window.scrollTo(0, 0);
   }
 
   return (
@@ -81,7 +83,11 @@ export default function App() {
             <ScreenerView onOpen={openResearch} />
           </div>
           {tab === "Research" && (
-            <ResearchView key={researchTicker} initialTicker={researchTicker} />
+            <ResearchView
+              key={opened?.research_id ?? "new"}
+              initialTicker={opened?.evaluation.ticker ?? "AAPL"}
+              initialResult={opened ?? undefined}
+            />
           )}
           {tab === "Build status" && <StatusView />}
         </div>

@@ -37,7 +37,30 @@ function failsOne(r: ResearchResult) {
 function pct(value: number | null | undefined, ref: number | null | undefined) {
   if (value == null || ref == null || ref === 0) return "Unavailable";
   const p = ((value - ref) / ref) * 100;
-  return `${p >= 0 ? "+" : ""}${p.toFixed(1)}%`;
+  const shown = p.toFixed(1);
+  if (Number(shown) === 0) return "0.0%";
+  return `${p > 0 ? "+" : ""}${shown}%`;
+}
+
+const RULE_TEXT: Record<string, string> = {
+  above_12m_average: "12-month avg",
+  above_sma_200: "200-day avg",
+  above_sma_150: "150-day avg",
+};
+
+// Names the trend rules that did not pass, so a FAIL is never unexplained.
+function trendDetail(r: ResearchResult) {
+  const notPassing = (r.trend?.rules ?? []).filter((x) => x.status !== "PASS");
+  if (!r.trend) return "Unavailable";
+  if (notPassing.length === 0) return "above all 3 averages";
+  if (notPassing.every((x) => x.status === "UNVERIFIED")) {
+    return r.technicals?.reliability.ok === false
+      ? "averages withheld: price data check failed"
+      : "averages unavailable";
+  }
+  return notPassing
+    .map((x) => `${x.status === "FAIL" ? "below" : "no data:"} ${RULE_TEXT[x.rule_name] ?? x.rule_name}`)
+    .join(", ");
 }
 
 function parseTickers(text: string) {
@@ -54,7 +77,7 @@ function parseTickers(text: string) {
 export default function ScreenerView({
   onOpen,
 }: {
-  onOpen: (ticker: string) => void;
+  onOpen: (result: ResearchResult) => void;
 }) {
   const [universe, setUniverse] = useState(DEFAULT_UNIVERSE);
   const [rows, setRows] = useState<Row[]>([]);
@@ -213,6 +236,7 @@ export default function ScreenerView({
                       </td>
                       <td>
                         <span className={`badge state-${trend}`}>{trend}</span>
+                        <small>{trendDetail(r)}</small>
                       </td>
                       <td>{t?.last_close ?? "Unavailable"}</td>
                       <td>{pct(t?.last_close, t?.sma_200)}</td>
@@ -225,7 +249,7 @@ export default function ScreenerView({
                         <button
                           className="button"
                           type="button"
-                          onClick={() => onOpen(r.evaluation.ticker)}
+                          onClick={() => onOpen(r)}
                         >
                           Research →
                         </button>

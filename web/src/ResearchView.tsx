@@ -28,12 +28,19 @@ function download(filename: string, text: string) {
 
 export default function ResearchView({
   initialTicker = "AAPL",
+  initialResult,
 }: {
   initialTicker?: string;
+  // A result the Screener already retrieved, so opening a row needs no new lookup.
+  initialResult?: ResearchResult;
 }) {
   const [ticker, setTicker] = useState(initialTicker);
   const [statements, setStatements] = useState(false);
-  const [phase, setPhase] = useState<Phase>({ name: "idle" });
+  const [phase, setPhase] = useState<Phase>(
+    initialResult
+      ? { name: "done", result: initialResult, clientSeconds: initialResult.server_elapsed_seconds }
+      : { name: "idle" },
+  );
   const [elapsed, setElapsed] = useState(0);
   const abort = useRef<AbortController | null>(null);
 
@@ -106,7 +113,7 @@ export default function ResearchView({
             />
             <span>
               Include statement-reported USD net profit
-              <small>
+              <small style={{ display: "block", marginTop: 4 }}>
                 Most recent report in the provider response; not inferred as
                 annual or TTM. If it fails validation the screen continues
                 without it.
