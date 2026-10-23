@@ -130,7 +130,13 @@ def analyse_research(result):
             timeout=180,
         )
         if not response.ok:
-            return failure("remote", f"Agent request failed: HTTP {response.status_code}.")
+            # IBM's error body (never contains the key) says why, e.g. bad agent id.
+            body = getattr(response, "text", "")
+            detail = " ".join(body.split())[:300] if isinstance(body, str) else ""
+            return failure(
+                "remote",
+                f"Agent request failed: HTTP {response.status_code}. {detail}".strip(),
+            )
         payload = response.json()
         content = payload["choices"][0]["message"]["content"]
         if not isinstance(content, str) or not content.strip():

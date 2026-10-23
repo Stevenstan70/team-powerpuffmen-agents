@@ -1,11 +1,16 @@
 import { useState } from "react";
 import ResearchView from "./ResearchView";
+import ScreenerView from "./ScreenerView";
 import StatusView from "./StatusView";
 
-const NAV = ["Research", "Build status"] as const;
+const NAV = ["Screener", "Research", "Build status"] as const;
 type Tab = (typeof NAV)[number];
 
 const HEADING: Record<Tab, { title: string; blurb: string }> = {
+  Screener: {
+    title: "Screener",
+    blurb: "Real companies checked against the screening rules. Unverified data stays labelled.",
+  },
   Research: {
     title: "Company research",
     blurb: "Evidence you can inspect. Decisions you control.",
@@ -17,8 +22,15 @@ const HEADING: Record<Tab, { title: string; blurb: string }> = {
 };
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("Research");
+  const [tab, setTab] = useState<Tab>("Screener");
+  const [researchTicker, setResearchTicker] = useState("AAPL");
   const h = HEADING[tab];
+
+  function openResearch(ticker: string) {
+    setResearchTicker(ticker);
+    setTab("Research");
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -64,7 +76,14 @@ export default function App() {
               <p>{h.blurb}</p>
             </div>
           </div>
-          {tab === "Research" ? <ResearchView /> : <StatusView />}
+          {/* Screener stays mounted so its results survive a trip to Research. */}
+          <div hidden={tab !== "Screener"}>
+            <ScreenerView onOpen={openResearch} />
+          </div>
+          {tab === "Research" && (
+            <ResearchView key={researchTicker} initialTicker={researchTicker} />
+          )}
+          {tab === "Build status" && <StatusView />}
         </div>
       </main>
     </div>

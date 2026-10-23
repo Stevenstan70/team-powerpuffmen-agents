@@ -26,8 +26,12 @@ function download(filename: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function ResearchView() {
-  const [ticker, setTicker] = useState("AAPL");
+export default function ResearchView({
+  initialTicker = "AAPL",
+}: {
+  initialTicker?: string;
+}) {
+  const [ticker, setTicker] = useState(initialTicker);
   const [statements, setStatements] = useState(false);
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
   const [elapsed, setElapsed] = useState(0);

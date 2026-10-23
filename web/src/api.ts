@@ -4,6 +4,7 @@
 export type RuleStatus = "pass" | "fail" | "unknown";
 
 export interface Criterion {
+  id?: string;
   rule_id?: string;
   label: string;
   operator?: string;
