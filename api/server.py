@@ -167,3 +167,42 @@ def research_agent(research_id: str):
         status = {"config": 503, "input": 422}.get(outcome["kind"], 502)
         raise HTTPException(status_code=status, detail=outcome["error"])
     return {**outcome, "elapsed_seconds": round(time.monotonic() - started, 2)}
+
+
+# The four synthetic scenarios from the original demo (app.py), evaluated by the
+# same policy-v2 function. Fictional inputs, labelled synthetic; no OpenD involved.
+_SCENARIO_BASE = {"market_cap_usd": 8_000_000_000, "close_price_usd": 45.20,
+                  "net_profit_usd": 620_000_000, "snapshot_volume_shares": 100_000}
+_SCENARIOS = [
+    ("ACME", "Synthetic All-Pass Company", {}, None),
+    ("BLUE", "Synthetic Negative-Profit Company", {"net_profit_usd": -1_000_000}, None),
+    ("CRST", "Synthetic Missing-Profit Company", {"net_profit_usd": None}, None),
+    ("SMCHG", "Synthetic Monitoring Company", {}, {"net_profit_usd": -1_000_000}),
+]
+
+
+@app.get("/api/scenarios")
+def scenarios():
+    from frontend.snapshot_adapter import evaluate_snapshot
+
+    out = []
+    for ticker, name, overrides, later in _SCENARIOS:
+        inputs = {**_SCENARIO_BASE, **overrides}
+        evaluation = evaluate_snapshot(ticker, inputs, source_mode="demo", company_name=name)
+        item = {"ticker": ticker, "name": name, "evaluation": evaluation}
+        if later is not None:
+            # Monitoring: a later check of the same company finds changed data.
+            updated = evaluate_snapshot(ticker, {**inputs, **later},
+                                        source_mode="demo", company_name=name)
+            before = {c["id"]: c for c in evaluation["criteria"]}
+            item["updated"] = updated
+            item["changes"] = [
+                {"label": c["label"], "old_value": before[c["id"]]["observed_fmt"],
+                 "new_value": c["observed_fmt"], "old_status": before[c["id"]]["status"],
+                 "new_status": c["status"]}
+                for c in updated["criteria"]
+                if c["status"] != before[c["id"]]["status"]
+                or c["observed_value"] != before[c["id"]]["observed_value"]
+            ]
+        out.append(item)
+    return out

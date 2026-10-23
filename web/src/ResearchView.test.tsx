@@ -91,7 +91,7 @@ describe("ResearchView", () => {
     render(<ResearchView />);
     await userEvent.click(screen.getByRole("checkbox"));
     await userEvent.click(screen.getByRole("button", { name: /retrieve/i }));
-    await screen.findByText(/Apple/);
+    await screen.findAllByText(/Apple/);
     expect(JSON.parse(f.mock.calls[0][1]!.body as string).include_statement_profit).toBe(true);
   });
 
@@ -121,7 +121,7 @@ describe("technicals and agent", () => {
     await userEvent.click(screen.getByRole("button", { name: /retrieve/i }));
     expect(await screen.findByText("Price trend")).toBeInTheDocument();
     expect(screen.getByText(/Trend check \(trend-check-v1\)/)).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /closing price/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: /closing price/i }).length).toBeGreaterThan(0);
   });
 
   it("says plainly when price history is unavailable and draws no chart", async () => {

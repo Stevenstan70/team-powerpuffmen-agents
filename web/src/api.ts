@@ -178,3 +178,30 @@ export function runAgent(
     signal,
   );
 }
+
+export interface ScenarioChange {
+  label: string;
+  old_value: string;
+  new_value: string;
+  old_status: RuleStatus;
+  new_status: RuleStatus;
+}
+
+export interface Scenario {
+  ticker: string;
+  name: string;
+  evaluation: Evaluation;
+  updated?: Evaluation;
+  changes?: ScenarioChange[];
+}
+
+export async function fetchScenarios(): Promise<Scenario[]> {
+  let response: Response;
+  try {
+    response = await fetch("/api/scenarios");
+  } catch {
+    throw new ApiError("Could not reach the local API.");
+  }
+  if (!response.ok) throw new ApiError(`Request failed (HTTP ${response.status}).`);
+  return (await response.json()) as Scenario[];
+}

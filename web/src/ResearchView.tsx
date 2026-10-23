@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import AgentCard from "./AgentCard";
+import PriceChart from "./PriceChart";
 import TechnicalCard from "./TechnicalCard";
 import { ApiError, runResearch, type ResearchResult, type RuleStatus } from "./api";
 
@@ -154,6 +155,10 @@ function Result({
 
   return (
     <>
+      <QuickTake result={result} />
+      <AgentCard key={result.research_id} researchId={result.research_id} />
+      <details className="deep-dive">
+        <summary>How this was checked: every rule, raw data and the full brief</summary>
       <section className="card">
         <div className="section-top">
           <div>
@@ -230,8 +235,6 @@ function Result({
 
       <TechnicalCard result={result} />
 
-      <AgentCard key={result.research_id} researchId={result.research_id} />
-
       <section className="card">
         <div className="eyebrow">EVIDENCE</div>
         <h2>Raw provider observations</h2>
@@ -295,6 +298,88 @@ function Result({
           </ReactMarkdown>
         </article>
       </section>
+      </details>
     </>
+  );
+}
+
+const AVG_NAME: Record<string, string> = {
+  above_12m_average: "12-month",
+  above_sma_200: "200-day",
+  above_sma_150: "150-day",
+};
+
+// The plain-language answer first. Detail stays in "How this was checked".
+function QuickTake({ result }: { result: ResearchResult }) {
+  const e = result.evaluation;
+  const t = result.technicals;
+  const vol = e.criteria.find((c) => c.id === "min_snapshot_volume");
+  const trend = result.trend;
+  const below = (trend?.rules ?? []).filter((r) => r.status === "FAIL").map((r) => AVG_NAME[r.rule_name] ?? r.rule_name);
+
+  const trendRow =
+    trend?.trend_check_status === "PASS"
+      ? { s: "PASS", head: "Uptrend", text: "Price is above its 12-month, 150-day and 200-day averages." }
+      : trend?.trend_check_status === "FAIL"
+        ? { s: "FAIL", head: "Weak trend", text: `Price is below its ${below.join(" and ")} average${below.length > 1 ? "s" : ""}.` }
+        : { s: "UNVERIFIED", head: "Can't tell", text: t?.reliability.reason ?? "Not enough reliable price history." };
+  const volRow =
+    vol?.status === "pass"
+      ? { s: "PASS", head: "Actively traded", text: `${vol.observed_fmt} traded in the latest snapshot.` }
+      : vol?.status === "fail"
+        ? { s: "FAIL", head: "Thinly traded", text: `Only ${vol.observed_fmt} in the latest snapshot.` }
+        : { s: "UNVERIFIED", head: "Volume unknown", text: "Trading volume was not available." };
+  const profit = e.criteria.find((c) => c.id === "positive_net_profit");
+  const profitKnown = profit && profit.status !== "unknown";
+  const fundRow = {
+    s: "UNVERIFIED",
+    head: "Fundamentals not verified",
+    text: profitKnown
+      ? `Profit ${profit.status === "pass" ? "is positive" : "is not positive"}; company size and price in USD still need checking.`
+      : "Company size, price and profit could not be verified in USD. Check them before deciding.",
+  };
+  const passed = [trendRow, volRow].filter((r) => r.s === "PASS").length;
+
+  return (
+    <section className="card quick">
+      <div className="section-top">
+        <div>
+          <div className="eyebrow">{e.ticker}</div>
+          <h2>{e.company_name ?? "Unnamed company"}</h2>
+        </div>
+        {t?.last_close != null && (
+          <div className="price">
+            <b>{t.last_close.toLocaleString()}</b>
+            <small>last close · {t.last_date}</small>
+          </div>
+        )}
+      </div>
+      <p className="lead">
+        {passed === 2
+          ? "Passes every check we could verify. Worth a closer look; fundamentals still need checking."
+          : passed === 0
+            ? "Does not pass the checks we could verify."
+            : "Mixed: passes one of the two checks we could verify."}
+      </p>
+      <div className="verdicts">
+        {[trendRow, volRow, fundRow].map((r) => (
+          <div className="verdict" key={r.head}>
+            <span className={`badge state-${r.s}`}>{r.s}</span>
+            <div>
+              <b>{r.head}</b>
+              <p>{r.text}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {result.warnings.length > 0 && (
+        <p className="fineprint">
+          Some optional data could not be used ({result.warnings.map((w) => w.stage.replace("_", " ")).join(", ")}).
+          Nothing was substituted.
+        </p>
+      )}
+      {result.price_series.length > 1 && <PriceChart series={result.price_series} />}
+      <p className="fineprint">Screening aid only, not investment advice.</p>
+    </section>
   );
 }

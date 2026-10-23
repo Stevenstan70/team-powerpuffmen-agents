@@ -39,3 +39,42 @@ td.wrap{white-space:normal;min-width:260px;line-height:1.6}
 .price-chart .key.sma200{background:#6d7f9a}
 h3.sub{font-size:13px;margin:22px 0 8px}
 .card .table-wrap td,.card .table-wrap th{white-space:normal}
+/* Type and personality */
+body{font-family:"IBM Plex Sans",Arial,Helvetica,sans-serif;font-variant-numeric:tabular-nums}
+h1,h2,.price b{font-family:"IBM Plex Serif",Georgia,serif;letter-spacing:-.3px}
+h1{font-size:34px}
+.brand-icon{font-family:"IBM Plex Serif",Georgia,serif;font-size:20px;font-style:italic;border-radius:50%;background:#173d40}
+.eyebrow{letter-spacing:1.2px}
+.lead{font-size:14px;line-height:1.6;margin:4px 0 18px;color:var(--ink)}
+/* Quick take */
+.card.quick{border-top:3px solid var(--teal)}
+.price{text-align:right}
+.price b{display:block;font-size:30px;font-weight:500}
+.price small{font-size:10px;color:var(--muted)}
+.verdicts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:8px}
+.verdict{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:6px;padding:14px;background:#fbfcfa}
+.verdict b{font-size:13px;font-weight:600}
+.verdict p{font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px}
+@media(max-width:850px){.verdicts{grid-template-columns:1fr}}
+/* Deep dive */
+.deep-dive{margin-bottom:24px}
+.deep-dive>summary{cursor:pointer;font-size:13px;color:var(--teal);padding:14px 0 18px;font-weight:500}
+/* Chart */
+.price-chart svg{font-family:"IBM Plex Sans",Arial,sans-serif}
+.price-chart .grid{stroke:#e9eeea;stroke-width:1}
+.price-chart .axis{stroke:#b9c6be;stroke-width:1}
+.price-chart .line{stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.price-chart .close{stroke-width:1.8}
+.price-chart .sma150,.price-chart .sma200{stroke-width:1.6;stroke-dasharray:5 3}
+.price-chart .axis-title{font-size:10px;fill:#8a9a91;letter-spacing:.4px}
+/* Scenarios */
+.scenario-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.scenario-grid .card{margin-bottom:0}
+@media(max-width:1000px){.scenario-grid{grid-template-columns:1fr}}
+.approval{margin-top:18px;padding:16px;border:1px dashed #c79a45;border-radius:6px;background:#fdf9ef}
+.approval>b{font-size:12px}
+.approval-actions{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.decision{font-size:12px;margin-top:12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.decision .text-button{padding:0}
+.verdict{flex-direction:column;gap:8px}
+.price-chart .key.close{position:static;background:var(--teal);font-size:0}

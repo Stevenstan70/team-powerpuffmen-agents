@@ -1,20 +1,25 @@
 import { useState } from "react";
 import type { ResearchResult } from "./api";
 import ResearchView from "./ResearchView";
+import ScenariosView from "./ScenariosView";
 import ScreenerView from "./ScreenerView";
 import StatusView from "./StatusView";
 
-const NAV = ["Screener", "Research", "Build status"] as const;
+const NAV = ["Screener", "Research", "Scenarios", "Build status"] as const;
 type Tab = (typeof NAV)[number];
 
 const HEADING: Record<Tab, { title: string; blurb: string }> = {
   Screener: {
     title: "Screener",
-    blurb: "Real companies checked against the screening rules. Unverified data stays labelled.",
+    blurb: "Which real US stocks pass the checks right now.",
+  },
+  Scenarios: {
+    title: "How it handles each case",
+    blurb: "Four fictional companies: a pass, a fail, missing data, and a change that needs your approval.",
   },
   Research: {
     title: "Company research",
-    blurb: "Evidence you can inspect. Decisions you control.",
+    blurb: "The short answer first. The evidence is one click away.",
   },
   "Build status": {
     title: "What works today",
@@ -37,7 +42,7 @@ export default function App() {
     <div className="shell">
       <aside className="sidebar">
         <a className="brand" href="/">
-          <span className="brand-icon">↗</span>
+          <span className="brand-icon">iq</span>
           <span>
             INVEST
             <br />
@@ -73,7 +78,6 @@ export default function App() {
         <div className="content">
           <div className="page-heading">
             <div>
-              <div className="eyebrow">PATIENT CAPITAL. VISIBLE EVIDENCE.</div>
               <h1>{h.title}</h1>
               <p>{h.blurb}</p>
             </div>
@@ -89,6 +93,7 @@ export default function App() {
               initialResult={opened ?? undefined}
             />
           )}
+          {tab === "Scenarios" && <ScenariosView />}
           {tab === "Build status" && <StatusView />}
         </div>
       </main>
