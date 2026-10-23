@@ -11,6 +11,18 @@ from frontend import market_chart as chart
 from frontend import real_screen as screen
 
 
+@pytest.fixture(autouse=True)
+def chart_enabled(monkeypatch):
+    # fetch_daily_candles refuses to run unless this deployment flag is set.
+    monkeypatch.setenv("ENABLE_MOOMOO_CHART", "1")
+
+
+def test_chart_is_disabled_unless_flag_is_set(monkeypatch):
+    monkeypatch.delenv("ENABLE_MOOMOO_CHART", raising=False)
+    with pytest.raises(RuntimeError, match="disabled in this deployment"):
+        chart.fetch_daily_candles("AAPL", 30)
+
+
 @pytest.fixture
 def provider(monkeypatch):
     mm = ModuleType("moomoo")
@@ -158,7 +170,7 @@ def install_candles(ctx, mutate=None, ret=0, page=None):
     ctx.request_history_kline.side_effect = response
 
 
-@pytest.mark.parametrize("days", [30, 90, 180])
+@pytest.mark.parametrize("days", [30, 90, 180, 400])
 def test_candles_success_sorts_and_preserves_values(provider, days):
     mm, ctx, _, _ = provider
     install_candles(ctx)

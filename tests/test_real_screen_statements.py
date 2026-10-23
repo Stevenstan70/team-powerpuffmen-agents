@@ -102,20 +102,47 @@ def test_opt_in_uses_statement_profit_and_preserves_provenance(provider):
     provider.ctx.close.assert_called_once_with()
 
 
-def test_statement_api_error_does_not_fall_back_to_snapshot_profit(provider):
-    provider.ctx.get_financials_statements.return_value = (-1, "unavailable")
-    with pytest.raises(RuntimeError, match="Financial-statement retrieval failed"):
-        retrieve_real_screen("AAPL", include_statement_profit=True)
+def assert_recovered_without_profit(result, provider, stage, error_type=None):
+    """Optional statement evidence failed: record it, never invent profit."""
+    assert result["statement_status"] == "unavailable"
+    assert len(result["warnings"]) == 1
+    warning = result["warnings"][0]
+    assert warning["stage"] == stage
+    if error_type is not None:
+        assert warning["error_type"] == error_type
+    profit = profit_row(result)
+    assert profit["status"] == "unknown"
+    assert "provenance" not in profit or profit["provenance"] is None
+    # The snapshot's own net_profit (-999) must never be substituted.
+    assert "-999" not in str(profit["observed_fmt"])
+    assert not any(
+        row["Provider field"] == "financial statements: field 8037"
+        for row in result["raw"]
+    )
+    # The screen still ran on the validated snapshot volume.
+    volume = [c for c in result["evaluation"]["criteria"]
+              if "volume" in c["label"].lower()]
+    assert len(volume) == 1 and volume[0]["status"] == "pass"
+    assert result["evaluation"]["aggregate_status"] == "unknown"
     provider.ctx.close.assert_called_once_with()
 
 
-def test_statement_exception_closes_context(provider):
+def test_statement_api_error_recovers_without_snapshot_profit(provider):
+    provider.ctx.get_financials_statements.return_value = (-1, "unavailable")
+    result = retrieve_real_screen("AAPL", include_statement_profit=True)
+    assert_recovered_without_profit(
+        result, provider, "statement_retrieval", "RuntimeError"
+    )
+
+
+def test_statement_exception_recovers_and_closes_context(provider):
     provider.ctx.get_financials_statements.side_effect = RuntimeError(
         "statement transport failed"
     )
-    with pytest.raises(RuntimeError, match="statement transport failed"):
-        retrieve_real_screen("AAPL", include_statement_profit=True)
-    provider.ctx.close.assert_called_once_with()
+    result = retrieve_real_screen("AAPL", include_statement_profit=True)
+    assert_recovered_without_profit(
+        result, provider, "statement_retrieval", "RuntimeError"
+    )
 
 
 @pytest.mark.parametrize("target,key,value", [
@@ -126,18 +153,29 @@ def test_statement_exception_closes_context(provider):
     ("item", "data", None),
     ("item", "data", True),
 ])
-def test_invalid_statement_evidence_fails_closed(provider, target, key, value):
+def test_invalid_statement_evidence_is_rejected_and_recovered(
+    provider, target, key, value
+):
     report = provider.payload["report_list"][0]
     destination = report if target == "report" else report["item_list"][0]
     destination[key] = value
-    with pytest.raises(ValueError):
-        retrieve_real_screen("AAPL", include_statement_profit=True)
-    provider.ctx.close.assert_called_once_with()
+    result = retrieve_real_screen("AAPL", include_statement_profit=True)
+    assert_recovered_without_profit(
+        result, provider, "statement_validation", "ValueError"
+    )
 
 
-def test_empty_reports_do_not_fall_back_to_snapshot_profit(provider):
+def test_empty_reports_recover_without_snapshot_profit(provider):
     provider.payload["report_list"] = []
-    with pytest.raises(ValueError):
+    result = retrieve_real_screen("AAPL", include_statement_profit=True)
+    assert_recovered_without_profit(
+        result, provider, "statement_validation", "ValueError"
+    )
+
+
+def test_identity_or_snapshot_errors_still_stop_the_request(provider):
+    provider.ctx.get_market_snapshot.return_value = (-1, "provider down")
+    with pytest.raises(RuntimeError, match="Snapshot retrieval failed"):
         retrieve_real_screen("AAPL", include_statement_profit=True)
     provider.ctx.close.assert_called_once_with()
 

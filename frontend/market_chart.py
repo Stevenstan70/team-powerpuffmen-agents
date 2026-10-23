@@ -25,7 +25,7 @@ def fetch_daily_candles(ticker, days):
         raise ValueError("Enter an exact US ticker, for example AAPL.")
     if ticker in {"ACME", "BLUE", "CRST", "SMCHG"}:
         raise ValueError("Demo fixture symbols are not market-chart inputs.")
-    if days not in (30, 90, 180):
+    if days not in (30, 90, 180, 400):
         raise ValueError("Unsupported date range.")
 
     code = f"US.{ticker}"

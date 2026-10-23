@@ -9,6 +9,66 @@ def _cell(value):
     return str(value).replace("|", "/").replace("\n", " ").replace("\r", " ")
 
 
+def _num(value):
+    return "Unavailable" if value is None else f"{value:,.2f}"
+
+
+def _technical_lines(result):
+    """Price-trend section; omitted entirely when technicals were not attempted."""
+    status = result.get("technicals_status")
+    if status is None:
+        return []
+    lines = ["", "## Technical measures (price history)"]
+    t = result.get("technicals")
+    if status != "computed" or not t:
+        lines.append(
+            "- Price-history measures were not retrieved. No technical "
+            "indicator has been estimated. See the recovery notes below."
+        )
+        return lines
+
+    lines += [
+        "- Source: Moomoo request_history_kline, daily candles, unadjusted, "
+        "regular sessions. Prices are in provider units; the currency is not "
+        "independently verified (ratios between prices in one series are "
+        "unit-independent).",
+        f"- Sessions used: {t['sessions']} ({_cell(t['first_date'])} to "
+        f"{_cell(t['last_date'])}). Request-time evidence, not a streaming feed.",
+        f"- Last close: {_num(t['last_close'])} on {_cell(t['last_date'])}",
+        f"- 50 / 150 / 200-session average: {_num(t['sma_50'])} / "
+        f"{_num(t['sma_150'])} / {_num(t['sma_200'])}",
+        f"- 12-month (252-session) average close: {_num(t['avg_close_12m'])}",
+        f"- 52-week high / low: {_num(t['high_52w'])} / {_num(t['low_52w'])}",
+        f"- Distance below 52-week high: {_num(t['pct_below_52w_high'])}%; "
+        f"above 52-week low: {_num(t['pct_above_52w_low'])}%",
+        f"- 50-session average volume: {_num(t['avg_volume_50d'])} shares",
+    ]
+    if not t["reliability"]["ok"]:
+        lines.append(f"- Reliability: {_cell(t['reliability']['reason'])}")
+    if t["unavailable"]:
+        lines.append(
+            "- Unavailable (not enough sessions or withheld): "
+            + ", ".join(t["unavailable"]) + "."
+        )
+
+    trend = result.get("trend")
+    if trend:
+        lines += [
+            "",
+            f"Trend check ({_cell(trend['criteria_version'])}): "
+            f"{_cell(trend['trend_check_status'])}",
+            "| Rule | Last close | Reference | Status |",
+            "|---|---|---|---|",
+        ]
+        for r in trend["rules"]:
+            lines.append(
+                f"| {_cell(r['threshold'])} | {_num(r['observed_value'])} | "
+                f"{_num(r['reference_value'])} | {_cell(r['status'])} |"
+            )
+        lines.append(f"- {_cell(trend['scope_note'])}")
+    return lines
+
+
 def build_research_brief(result):
     """Format existing evidence without changing it or inventing facts."""
     e = result["evaluation"]
@@ -54,6 +114,8 @@ def build_research_brief(result):
     lines += ["", "## Rule explanations"]
     for c in rules:
         lines.append(f"- {_cell(c['label'])}: {_cell(c['explanation'])}")
+
+    lines += _technical_lines(result)
 
     lines += ["", "## Statement evidence"]
     if statement_status == "not_requested":

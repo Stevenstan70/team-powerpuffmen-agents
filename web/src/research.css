@@ -1,0 +1,40 @@
+/* Additions on top of the shared theme (friend-theme.css). */
+.research-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:22px;margin-top:22px}
+.research-form label{display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--muted)}
+.research-form label.check{flex-direction:row;align-items:flex-start;gap:10px;max-width:430px;color:var(--ink)}
+.research-form label.check input{width:auto;max-width:none;margin-top:2px}
+.research-form input[type=text],.research-form input:not([type]){width:160px;font-size:14px;letter-spacing:1px}
+.button.primary{background:var(--teal);border-color:var(--teal);color:white;padding:12px 20px;font-size:12px}
+.button.primary:hover:not(:disabled){background:#17503f}
+.button:disabled{opacity:.6;cursor:progress}
+.notice.error{border-left-color:#ad5144;background:#fbefeb}
+.notice.warn{border-left-color:#c79a45;background:#f9f2e2}
+.card .notice{margin:18px 0}
+.section-top{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+.fineprint{font-size:11px;color:var(--muted);line-height:1.7;margin-top:10px}
+td.wrap{white-space:normal;min-width:260px;line-height:1.6}
+.timing{color:var(--ink)}
+.provenance{margin-top:14px;font-size:11px}
+.provenance pre{background:#fafbf8;border:1px solid var(--line);border-radius:5px;padding:14px;overflow:auto;font-size:11px}
+.plain-list{margin:14px 0 0;padding-left:20px;line-height:1.9;font-size:12px}
+.brief{margin-top:16px;border-top:1px solid var(--line);padding-top:8px;font-size:12px;line-height:1.7;overflow-x:auto}
+.brief h1{font-size:22px;margin:14px 0 8px}
+.brief h2{font-size:16px;margin:22px 0 8px}
+.brief ul{padding-left:20px}
+.brief table{white-space:normal;margin:10px 0}
+.brief th,.brief td{padding:9px 11px;border:1px solid #eef1eb;vertical-align:top}
+.nav{font-size:13px}
+
+.price-chart{margin:18px 0 8px}
+.price-chart svg{width:100%;height:auto;font-size:10px;fill:var(--muted)}
+.price-chart .axis{stroke:var(--line);stroke-width:1}
+.price-chart .line{fill:none;stroke-width:1.6}
+.price-chart .close{stroke:var(--teal);stroke-width:2}
+.price-chart .sma150{stroke:#c79a45}
+.price-chart .sma200{stroke:#6d7f9a}
+.price-chart figcaption{font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}
+.price-chart figcaption small{flex-basis:100%;margin-top:2px}
+.price-chart .key{display:inline-block;width:14px;height:3px;margin-right:6px;vertical-align:middle;background:var(--teal)}
+.price-chart .key.sma150{background:#c79a45}
+.price-chart .key.sma200{background:#6d7f9a}
+h3.sub{font-size:13px;margin:22px 0 8px}

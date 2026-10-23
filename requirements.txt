@@ -4,3 +4,5 @@ numpy
 pandas
 ibm-watsonx-orchestrate
 moomoo-api
+fastapi
+uvicorn
