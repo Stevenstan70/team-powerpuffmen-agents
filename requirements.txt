@@ -1,0 +1,5 @@
+﻿streamlit
+altair
+numpy
+pandas
+ibm-watsonx-orchestrate
