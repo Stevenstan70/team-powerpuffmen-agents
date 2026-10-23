@@ -16,8 +16,9 @@ assertion maps to the new interface so that no behavioural coverage is lost:
   selectbox.set_value(company).run()   button(key=demo_KEY).click().run()
                                        + form_submit_button submit
   button[0] ("▶ Run basic screen")     form submit via at.button(key=…)
-  "SYNTHETIC DEMO DATA" warning        still present — text updated to include
-                                       "SYNTHETIC DEMO DATA — PROTOTYPE"
+  "SYNTHETIC DEMO DATA" warning        replaced by a PROTOTYPE info banner;
+                                       demo label still appears per-ticker as
+                                       a st.warning after running a demo screen
   "Aggregate status" caption           shown before ticker is set (unchanged)
   "AI agent not connected" caption     shown before ticker is set (unchanged)
   "Press ▶ Run basic screen" prompt    shown before ticker is set (unchanged)
@@ -156,15 +157,17 @@ class TestAppInitialRender(unittest.TestCase):
         )
 
     def test_synthetic_data_warning_always_visible(self):
-        """The persistent demo-data warning must be visible at all times.
+        """A persistent prototype/session-only notice must be visible at all times.
 
-        Old assertion: "SYNTHETIC DEMO DATA"
-        New text:      "SYNTHETIC DEMO DATA — PROTOTYPE" (same substring still present)
+        The global banner was changed from a st.warning("SYNTHETIC DEMO DATA…")
+        to a st.info("PROTOTYPE…") so that live Moomoo runs are not mislabelled
+        as synthetic.  The per-ticker DEMO label still appears after running a
+        demo fixture (tested in TestDemoLabelInvariant and TestAcmeAllPass).
         """
-        warnings = [w.value for w in self.at.warning]
+        infos = [i.value for i in self.at.info]
         self.assertTrue(
-            any("SYNTHETIC DEMO DATA" in w for w in warnings),
-            f"Synthetic-data warning missing. Warnings: {warnings}",
+            any("PROTOTYPE" in i for i in infos),
+            f"Prototype notice missing from info boxes. Infos: {infos}",
         )
 
     def test_demo_shortcut_buttons_present(self):
@@ -817,6 +820,152 @@ class TestCriteriaTableColumnNames(unittest.TestCase):
         for val in self.df["Status"]:
             self.assertIn(val, valid_statuses,
                           f"Unexpected status value: {val!r}")
+
+
+# ---------------------------------------------------------------------------
+# 8. Demo shortcut button — single click from blank session
+#    These tests exercise the actual shortcut buttons (not text_input.set_value).
+#    They must FAIL before the demo-shortcut bug is fixed and PASS after.
+# ---------------------------------------------------------------------------
+
+class TestDemoShortcutClick(unittest.TestCase):
+    """Exercise actual demo clicks, state, rendering, and provider isolation."""
+
+    def _fresh(self):
+        at = AppTest.from_file(APP_PATH, default_timeout=30)
+        at.run()
+        self.assertFalse(at.exception, str(at.exception))
+        self.assertEqual(at.text_input(key="ticker_text_input").value, "")
+        return at
+
+    def _click(self, at, ticker):
+        at.button(key=_DEMO_BTN_KEY[ticker]).click().run()
+        self.assertFalse(at.exception, str(at.exception))
+        return at
+
+    def _assert_result(self, at, ticker, status):
+        evaluation = at.session_state["current_eval"]
+        self.assertIsNotNone(evaluation)
+        self.assertEqual(at.text_input(key="ticker_text_input").value, ticker)
+        self.assertEqual(at.session_state["selected_ticker"], ticker)
+        self.assertEqual(evaluation["ticker"], ticker)
+        self.assertEqual(evaluation["mode"], "demo")
+        self.assertFalse(evaluation["is_live"])
+        self.assertIsNone(evaluation["error"])
+        self.assertEqual(evaluation["aggregate_status"], status)
+        self.assertEqual(len(evaluation["criteria"]), 4)
+        self.assertGreater(len(at.dataframe), 0)
+        table = at.dataframe[0].value
+        self.assertEqual(len(table), 4)
+        expected_statuses = {
+            "pass": "✅ PASS", "fail": "❌ FAIL", "unknown": "⚠️ UNKNOWN"
+        }
+        self.assertEqual(
+            list(table["Status"]),
+            [expected_statuses[c["status"]] for c in evaluation["criteria"]],
+        )
+        self.assertTrue(any(
+            "DEMO DATA" in warning.value and "fixtures" in warning.value
+            for warning in at.warning
+        ), "Result-specific demo warning is missing")
+        self.assertTrue(any(
+            expected_statuses[status] in element.value
+            for element in at.markdown
+        ), "Aggregate result banner is missing")
+        headings = " ".join(element.value for element in at.subheader)
+        self.assertIn(evaluation["company_name"], headings)
+        self.assertIn(ticker, headings)
+        self.assertFalse(any(
+            "Enter a ticker above or pick a demo shortcut" in info.value
+            for info in at.info
+        ))
+
+    def test_acme_single_click(self):
+        at = self._click(self._fresh(), "ACME")
+        self._assert_result(at, "ACME", "pass")
+
+    def test_blue_single_click(self):
+        at = self._click(self._fresh(), "BLUE")
+        self._assert_result(at, "BLUE", "fail")
+
+    def test_crst_single_click(self):
+        at = self._click(self._fresh(), "CRST")
+        self._assert_result(at, "CRST", "unknown")
+
+    def test_smchg_single_click(self):
+        at = self._click(self._fresh(), "SMCHG")
+        self._assert_result(at, "SMCHG", "pass")
+
+    def test_results_persist_on_rerun(self):
+        import copy
+        for ticker, status in (
+            ("ACME", "pass"), ("BLUE", "fail"),
+            ("CRST", "unknown"), ("SMCHG", "pass"),
+        ):
+            with self.subTest(ticker=ticker):
+                at = self._click(self._fresh(), ticker)
+                before = copy.deepcopy(at.session_state["current_eval"])
+                at.run()
+                self.assertFalse(at.exception, str(at.exception))
+                self._assert_result(at, ticker, status)
+                self.assertEqual(at.session_state["current_eval"], before)
+
+    def test_switching_shortcuts_replaces_result_and_clears_analysis(self):
+        at = self._click(self._fresh(), "ACME")
+        at.session_state["current_analysis"] = {
+            "connected": True, "content": "STALE_ACME_ANALYSIS"
+        }
+        self._click(at, "BLUE")
+        self._assert_result(at, "BLUE", "fail")
+        self.assertIsNone(at.session_state["current_analysis"])
+        self.assertEqual(at.session_state["resolved_company"]["ticker"], "BLUE")
+        self.assertNotIn("STALE_ACME_ANALYSIS", _all_text(at))
+
+    def test_switching_shortcut_clears_existing_pending_approval(self):
+        import copy
+        at = self._click(self._fresh(), "ACME")
+        baseline = copy.deepcopy(at.session_state["current_eval"])
+        at.session_state["tracked"] = {
+            "ACME": {"saved_at": "2025-01-01T00:00:00Z", "evaluation": baseline}
+        }
+        at.session_state["qualified_list"] = {"ACME"}
+        at.session_state["needs_review_list"] = set()
+        at.session_state["action_log"] = [{"action": "saved_baseline", "ticker": "ACME",
+                                           "timestamp": "2025-01-01T00:00:00Z"}]
+        pending = {
+            "ticker": "ACME", "eval_id": "ACME@test",
+            "proposed_action": "move_to_needs_review",
+            "change_result": {"new_evaluation": baseline, "changes": []},
+        }
+        at.session_state["pending_approval"] = pending
+        self.assertEqual(at.session_state["pending_approval"], pending)
+        tracked_before = copy.deepcopy(at.session_state["tracked"])
+        log_before = copy.deepcopy(at.session_state["action_log"])
+        self._click(at, "BLUE")
+        self.assertIsNone(at.session_state["pending_approval"])
+        self.assertEqual(at.session_state["tracked"], tracked_before)
+        self.assertEqual(at.session_state["action_log"], log_before)
+        self.assertEqual(at.session_state["qualified_list"], {"ACME"})
+        self.assertEqual(at.session_state["needs_review_list"], set())
+
+    def test_demo_shortcuts_make_no_provider_requests(self):
+        from unittest.mock import patch
+        with (
+            patch("frontend.adapter.resolve_ticker") as resolve,
+            patch("frontend.adapter.fetch_moomoo_inputs") as fetch,
+        ):
+            at = self._fresh()
+            for ticker, status in (
+                ("ACME", "pass"), ("BLUE", "fail"),
+                ("CRST", "unknown"), ("SMCHG", "pass"),
+            ):
+                with self.subTest(ticker=ticker):
+                    self._click(at, ticker)
+                    self._assert_result(at, ticker, status)
+                    at.run()
+                    self.assertFalse(at.exception, str(at.exception))
+            resolve.assert_not_called()
+            fetch.assert_not_called()
 
 
 if __name__ == "__main__":

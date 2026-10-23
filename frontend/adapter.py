@@ -1,87 +1,65 @@
 """
-frontend/adapter.py — Data adapter for the Powerpuffmen screening UI.
+Data adapter for the Powerpuffmen screening UI.
 
-Separates presentation from backend calls.  Three public functions:
+Preserves the original screening policy:
+- Market-cap range
+- Minimum previous closing price
+- Positive operating cash flow TTM
+- Minimum employee count
 
-    evaluate_company(ticker, inputs)   → screening criteria result
-    analyse_company(ticker, inputs)    → AI agent analysis result
-    check_for_changes(ticker, baseline) → change-detection result
+This module does not implement a new policy, CSV integration,
+scheduled monitoring, backtesting, or an Orchestrate connection.
 
-Live path: calls tools/powerpuffmen_basic_screen via .fn() where available.
-Demo path: returns clearly-labelled fixtures when live data is not present.
-The adapter never pretends demo output is live output.
-
-Demo mode must not call live write operations.
+Demo data requires an explicit demo_override.
+Missing inputs never silently become demo data.
 """
 
 from __future__ import annotations
 
-import sys
-import os
 import copy
 import datetime as _dt
+import math
+import os
+import re
+import sys
 from typing import Optional
 
-# ---------------------------------------------------------------------------
-# Allow import of tools/ without installing the package
-# ---------------------------------------------------------------------------
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# ---------------------------------------------------------------------------
-# Try to import the real screening backend
-# ---------------------------------------------------------------------------
+
+_SCREEN_IMPORT_ERROR = None
+
 try:
     from tools.powerpuffmen_basic_screen import powerpuffmen_basic_screen
-    _screen_fn = powerpuffmen_basic_screen.fn
-    _SCREEN_BACKEND_AVAILABLE = True
-except Exception:  # pragma: no cover
+
+    _screen_fn = getattr(
+        powerpuffmen_basic_screen,
+        "fn",
+        powerpuffmen_basic_screen,
+    )
+    _SCREEN_BACKEND_AVAILABLE = callable(_screen_fn)
+except Exception as exc:
     _screen_fn = None
     _SCREEN_BACKEND_AVAILABLE = False
+    _SCREEN_IMPORT_ERROR = str(exc)
 
-# ---------------------------------------------------------------------------
-# Try to import Moomoo (optional — not available in all environments)
-# ---------------------------------------------------------------------------
+
 try:
     import moomoo as _ft
+
     _MOOMOO_AVAILABLE = True
-except ImportError:  # pragma: no cover
+except ImportError:
     _ft = None
     _MOOMOO_AVAILABLE = False
+
 
 _MOOMOO_HOST = "127.0.0.1"
 _MOOMOO_PORT = 11111
 
-# ---------------------------------------------------------------------------
-# Canonical AdapterResult shape
-# ---------------------------------------------------------------------------
-# evaluate_company returns:
-# {
-#   "mode":        "live" | "demo",
-#   "ticker":      str,
-#   "company_name": str,
-#   "currency":    str,
-#   "data_timestamp": str (ISO-8601),
-#   "is_live":     bool,
-#   "criteria":    [ CriterionResult, ... ],
-#   "aggregate_status": "pass" | "fail" | "unknown",
-#   "scope_note":  str,
-#   "error":       None | str,
-# }
-#
-# CriterionResult:
-# {
-#   "id":              str,       # rule_name key
-#   "label":           str,       # human-readable label
-#   "operator":        str,       # e.g. "between", ">= ", "> "
-#   "threshold":       str,       # raw threshold expression
-#   "unit":            str,       # "USD", "count", etc.
-#   "reporting_period": str,       # "TTM", "latest", etc.
-#   "observed_value":  float|None,
-#   "observed_fmt":    str,        # pre-formatted display string
-#   "status":          "pass" | "fail" | "unknown",
-# }
+_POLICY_VERSION = "legacy-four-rules-previous-close-v1"
 
 _SCOPE_NOTE = (
     "Only the criteria returned by the screening tool were evaluated. "
@@ -89,38 +67,27 @@ _SCOPE_NOTE = (
     "an investment recommendation."
 )
 
+_INPUT_KEYS = (
+    "market_cap_usd",
+    "close_price_usd",
+    "operating_cash_flow_ttm_usd",
+    "employee_count",
+)
+
 _DEMO_TS = "2025-01-01T00:00:00Z"
+
 _DEMO_COMPANY_NAMES = {
-    "ACME":  "Acme Galactic Ltd (Demo)",
-    "BLUE":  "Bluebird Ventures (Demo)",
-    "CRST":  "Crescent Peak Corp (Demo)",
+    "ACME": "Acme Galactic Ltd (Demo)",
+    "BLUE": "Bluebird Ventures (Demo)",
+    "CRST": "Crescent Peak Corp (Demo)",
     "SMCHG": "SimCo Inc. (Simulated-change Demo)",
 }
 
-# ---------------------------------------------------------------------------
-# Formatting helpers (kept local; presentation layer may override)
-# ---------------------------------------------------------------------------
+# Syntax only. Security existence is verified separately.
+# No automatic mapping between "." and "-" share-class notation.
+_TICKER_RE = re.compile(r"[A-Z0-9]+(?:[.-][A-Z0-9]+)*")
 
-def _fmt_usd(v) -> str:
-    if v is None:
-        return "Unknown"
-    if abs(v) >= 1_000_000_000:
-        return f"${v / 1_000_000_000:,.2f} B"
-    if abs(v) >= 1_000_000:
-        return f"${v / 1_000_000:,.2f} M"
-    return f"${v:,.2f}"
-
-
-def _fmt_employees(v) -> str:
-    if v is None:
-        return "Unknown"
-    return f"{int(v):,}"
-
-
-# ---------------------------------------------------------------------------
-# Convert a raw rule dict (from powerpuffmen_basic_screen) to a CriterionResult
-# ---------------------------------------------------------------------------
-_RULE_META: dict[str, dict] = {
+_RULE_META = {
     "market_cap_range": {
         "label": "Market Cap Range",
         "operator": "between",
@@ -128,10 +95,10 @@ _RULE_META: dict[str, dict] = {
         "reporting_period": "latest",
     },
     "min_close_price": {
-        "label": "Min Close Price",
+        "label": "Minimum Previous Close Price",
         "operator": ">=",
         "unit": "USD",
-        "reporting_period": "latest",
+        "reporting_period": "previous completed trading session",
     },
     "positive_operating_cash_flow": {
         "label": "Positive Operating Cash Flow (TTM)",
@@ -140,704 +107,956 @@ _RULE_META: dict[str, dict] = {
         "reporting_period": "TTM",
     },
     "min_employee_count": {
-        "label": "Min Employee Count",
+        "label": "Minimum Employee Count",
         "operator": ">=",
         "unit": "count",
-        "reporting_period": "latest",
+        "reporting_period": "company profile; date unverified",
     },
 }
 
+
+def _now_iso() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def _number(value, *, integer=False):
+    """Convert finite numeric values; unknown/invalid values become None."""
+    if value is None or isinstance(value, bool):
+        return None
+
+    try:
+        if isinstance(value, str):
+            value = value.strip().replace(",", "")
+            if not value:
+                return None
+
+        result = float(value)
+
+        if not math.isfinite(result):
+            return None
+
+        if integer:
+            if result < 0 or not result.is_integer():
+                return None
+            return int(result)
+
+        return result
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _text(value):
+    if value is None:
+        return None
+
+    text = str(value).strip()
+
+    if not text or text.lower() in {"nan", "none", "nat", "<na>"}:
+        return None
+
+    return text
+
+
+def _fmt_usd(value) -> str:
+    value = _number(value)
+
+    if value is None:
+        return "Unknown"
+    if abs(value) >= 1_000_000_000:
+        return f"${value / 1_000_000_000:,.2f} B"
+    if abs(value) >= 1_000_000:
+        return f"${value / 1_000_000:,.2f} M"
+
+    return f"${value:,.2f}"
+
+
+def _fmt_employees(value) -> str:
+    value = _number(value, integer=True)
+    return "Unknown" if value is None else f"{value:,}"
+
+
 _RULE_FMT = {
     "market_cap_range": _fmt_usd,
+    "min_close_price": _fmt_usd,
     "positive_operating_cash_flow": _fmt_usd,
-    "min_close_price": lambda v: f"${v:,.2f}" if v is not None else "Unknown",
     "min_employee_count": _fmt_employees,
 }
 
 
+def _normalise_inputs(inputs: dict) -> dict:
+    result = {
+        key: _number(
+            inputs.get(key),
+            integer=(key == "employee_count"),
+        )
+        for key in _INPUT_KEYS
+    }
+
+    for key in ("market_cap_usd", "close_price_usd"):
+        value = result[key]
+        if value is not None and value <= 0:
+            result[key] = None
+
+    return result
+
+
+def _close_context(ctx):
+    if ctx is not None:
+        try:
+            ctx.close()
+        except Exception:
+            pass
+
+
 def _rule_to_criterion(rule: dict) -> dict:
-    rule_id = rule["rule_name"]
-    meta = _RULE_META.get(rule_id, {
-        "label": rule_id.replace("_", " ").title(),
-        "operator": "?",
-        "unit": "",
-        "reporting_period": "",
-    })
-    status_map = {"PASS": "pass", "FAIL": "fail", "UNVERIFIED": "unknown"}
-    fmt_fn = _RULE_FMT.get(rule_id, lambda v: str(v) if v is not None else "Unknown")
+    rule_id = str(rule["rule_name"])
+
+    meta = _RULE_META.get(
+        rule_id,
+        {
+            "label": rule_id.replace("_", " ").title(),
+            "operator": "?",
+            "unit": "",
+            "reporting_period": "",
+        },
+    )
+
+    value = _number(
+        rule.get("observed_value"),
+        integer=(rule_id == "min_employee_count"),
+    )
+
+    if (
+        rule_id in {"market_cap_range", "min_close_price"}
+        and value is not None
+        and value <= 0
+    ):
+        value = None
+
+    status_map = {
+        "PASS": "pass",
+        "FAIL": "fail",
+        "UNVERIFIED": "unknown",
+        "UNKNOWN": "unknown",
+    }
+
+    status = status_map.get(
+        str(rule.get("status", "")).upper(),
+        "unknown",
+    )
+
+    if value is None:
+        status = "unknown"
+
+    formatter = _RULE_FMT.get(
+        rule_id,
+        lambda v: "Unknown" if v is None else str(v),
+    )
+
     return {
         "id": rule_id,
         "label": meta["label"],
         "operator": meta["operator"],
-        "threshold": rule["threshold"],
+        "threshold": str(rule.get("threshold", "")),
         "unit": meta["unit"],
         "reporting_period": meta["reporting_period"],
-        "observed_value": rule["observed_value"],
-        "observed_fmt": fmt_fn(rule["observed_value"]),
-        "status": status_map.get(rule["status"], "unknown"),
+        "observed_value": value,
+        "observed_fmt": formatter(value),
+        "status": status,
+        "explanation": str(rule.get("explanation", "")),
     }
 
 
 def _aggregate_from_criteria(criteria: list[dict]) -> str:
-    statuses = {c["status"] for c in criteria}
+    if not criteria:
+        return "unknown"
+
+    statuses = {c.get("status", "unknown") for c in criteria}
+
     if "fail" in statuses:
         return "fail"
-    if "unknown" in statuses:
-        return "unknown"
-    return "pass"
+    if statuses == {"pass"}:
+        return "pass"
+
+    return "unknown"
 
 
-# ---------------------------------------------------------------------------
-# Public: validate_ticker
-# ---------------------------------------------------------------------------
-
-#: Regex for a syntactically valid ticker: 1–10 word characters only.
-#: Rejects multi-word strings like "baba amskd".
-import re as _re
-_TICKER_RE = _re.compile(r'^[A-Z0-9]{1,10}$')
+def _evaluation_error(ticker: str, message: str) -> dict:
+    return {
+        "mode": "error",
+        "ticker": ticker,
+        "company_name": None,
+        "currency": "USD",
+        "data_timestamp": None,
+        "evaluated_at": _now_iso(),
+        "criteria_version": _POLICY_VERSION,
+        "source": "unavailable",
+        "is_live": False,
+        "criteria": [],
+        "aggregate_status": "unknown",
+        "scope_note": _SCOPE_NOTE,
+        "error": message,
+    }
 
 
 def validate_ticker(raw: str) -> dict:
-    """Validate a ticker string entered by the user.
-
-    Returns:
-        {
-            "valid":   bool,
-            "ticker":  str,   # normalised (upper-stripped) if valid, else ""
-            "reason":  str | None,  # human-readable rejection reason
+    """Validate one US ticker's syntax without a network request."""
+    if not isinstance(raw, str) or not raw.strip():
+        return {
+            "valid": False,
+            "ticker": "",
+            "reason": "Ticker cannot be empty.",
         }
 
-    Validation rules (all in the frontend — no network call):
-    1. Must be non-empty after stripping whitespace.
-    2. Must be a single word (no spaces).
-    3. Must match ^[A-Z0-9]{1,10}$ after uppercasing.
-    Inputs like "baba amskd" are rejected at rule 2.
-    Inputs like "XYZXYZ999999" are rejected at rule 3.
-    """
-    stripped = raw.strip()
-    if not stripped:
-        return {"valid": False, "ticker": "", "reason": "Ticker cannot be empty."}
-    if " " in stripped or "\t" in stripped:
+    ticker = raw.strip().upper()
+
+    if any(char.isspace() for char in ticker):
         return {
             "valid": False,
             "ticker": "",
             "reason": (
-                f"'{stripped}' looks like multiple words. "
-                "Enter a single ticker symbol, e.g. AAPL."
+                "Input looks like multiple words. "
+                "Enter one ticker symbol."
             ),
         }
-    upper = stripped.upper()
-    if not _TICKER_RE.match(upper):
+
+    if ticker.startswith("US."):
+        ticker = ticker[3:]
+
+    if (
+        not 1 <= len(ticker) <= 10
+        or _TICKER_RE.fullmatch(ticker) is None
+    ):
         return {
             "valid": False,
             "ticker": "",
             "reason": (
-                f"'{upper}' is not a valid ticker format. "
-                "Use 1–10 letters/digits only, e.g. AAPL or BRK.A."
+                "Use one ticker with 1-10 letters/digits and optional "
+                "internal dots or hyphens. Its existence will be checked "
+                "separately against Moomoo."
             ),
         }
-    return {"valid": True, "ticker": upper, "reason": None}
 
+    return {"valid": True, "ticker": ticker, "reason": None}
 
-# ---------------------------------------------------------------------------
-# Public: resolve_ticker
-# ---------------------------------------------------------------------------
 
 def resolve_ticker(ticker: str) -> dict:
-    """Look up a ticker in Moomoo and return company metadata.
+    """Resolve an exact US STOCK match; never choose a similar company."""
+    validation = validate_ticker(ticker)
+    normalised = validation["ticker"] if validation["valid"] else ""
 
-    This is the single point of contact with Moomoo for company identity.
-    It does NOT retrieve financial metrics — that is fetch_moomoo_inputs().
+    result = {
+        "connected": False,
+        "found": False,
+        "ticker": normalised,
+        "moomoo_code": None,
+        "company_name": None,
+        "sec_type": None,
+        "error": None,
+    }
 
-    Returns:
-        {
-            "connected":    bool,
-            "found":        bool,
-            "ticker":       str,          # e.g. "AAPL"
-            "moomoo_code":  str | None,   # e.g. "US.AAPL"
-            "company_name": str | None,
-            "sec_type":     str | None,   # "STOCK", "ETF", etc.
-            "error":        str | None,
-        }
+    if not validation["valid"]:
+        result["error"] = validation["reason"]
+        return result
 
-    Only tickers of sec_type STOCK are considered valid for screening.
-    If Moomoo OpenD is not running, returns connected=False with a clear error.
-    Never fabricates a company name — unverified input is not shown as a heading.
-    """
     if not _MOOMOO_AVAILABLE:
-        return {
-            "connected": False, "found": False,
-            "ticker": ticker, "moomoo_code": None,
-            "company_name": None, "sec_type": None,
-            "error": "moomoo-api package is not installed.",
-        }
+        result["error"] = "moomoo-api package is not installed."
+        return result
 
     ctx = None
+
     try:
-        ctx = _ft.OpenQuoteContext(host=_MOOMOO_HOST, port=_MOOMOO_PORT)
-        # Search with the raw ticker as keyword; exact match wins
-        ret, data = ctx.get_search_quote(ticker, max_count=10)
+        ctx = _ft.OpenQuoteContext(
+            host=_MOOMOO_HOST,
+            port=_MOOMOO_PORT,
+        )
+
+        ret, data = ctx.get_search_quote(normalised, max_count=10)
+
         if ret != _ft.RET_OK:
-            return {
-                "connected": True, "found": False,
-                "ticker": ticker, "moomoo_code": None,
-                "company_name": None, "sec_type": None,
-                "error": f"Moomoo search failed: {data}",
-            }
+            result["error"] = (
+                f"Unable to verify company: Moomoo search failed: {data}"
+            )
+            return result
+
+        result["connected"] = True
+
         if data.empty:
-            return {
-                "connected": True, "found": False,
-                "ticker": ticker, "moomoo_code": None,
-                "company_name": None, "sec_type": None,
-                "error": f"No results found for '{ticker}'.",
-            }
-        # Prefer an exact US STOCK match; fall back to first STOCK result
-        candidates = data[data["sec_type"] == "STOCK"]
-        if candidates.empty:
-            return {
-                "connected": True, "found": False,
-                "ticker": ticker, "moomoo_code": None,
-                "company_name": None, "sec_type": data.iloc[0]["sec_type"],
-                "error": (
-                    f"'{ticker}' was found but is a {data.iloc[0]['sec_type']}, "
-                    "not a STOCK. Only stocks are supported."
-                ),
-            }
-        # Prefer US market exact code match
-        us_exact = candidates[candidates["code"] == f"US.{ticker}"]
-        row = us_exact.iloc[0] if not us_exact.empty else candidates.iloc[0]
-        return {
-            "connected": True, "found": True,
-            "ticker": ticker,
-            "moomoo_code": row["code"],
-            "company_name": row["name"],
-            "sec_type": row["sec_type"],
-            "error": None,
-        }
+            result["error"] = (
+                f"No exact US stock match found for '{normalised}'."
+            )
+            return result
+
+        required = {"code", "name", "sec_type"}
+        if not required.issubset(data.columns):
+            result["error"] = (
+                "Unexpected search response schema. Company not verified."
+            )
+            return result
+
+        expected_code = f"US.{normalised}"
+
+        exact = data[
+            data["code"].astype(str).str.upper().eq(expected_code)
+        ]
+
+        if exact.empty:
+            result["error"] = (
+                f"No exact US stock match found for '{normalised}'. "
+                "No alternative company was selected."
+            )
+            return result
+
+        stock_rows = exact[
+            exact["sec_type"].astype(str).str.upper().eq("STOCK")
+        ]
+
+        if stock_rows.empty:
+            result["sec_type"] = str(exact.iloc[0]["sec_type"])
+            result["error"] = (
+                "The exact security is not classified as STOCK. "
+                "Only stocks are supported."
+            )
+            return result
+
+        names = stock_rows["name"].dropna().astype(str).unique()
+        if len(names) != 1:
+            result["error"] = (
+                "Ambiguous company identity. No company was selected."
+            )
+            return result
+
+        row = stock_rows.iloc[0]
+
+        result.update(
+            found=True,
+            moomoo_code=str(row["code"]),
+            company_name=str(row["name"]),
+            sec_type="STOCK",
+            error=None,
+        )
+        return result
+
     except Exception as exc:
-        return {
-            "connected": False, "found": False,
-            "ticker": ticker, "moomoo_code": None,
-            "company_name": None, "sec_type": None,
-            "error": f"Moomoo connection error: {exc}",
-        }
+        result["error"] = (
+            f"Unable to verify company: {type(exc).__name__}: {exc}"
+        )
+        return result
     finally:
-        if ctx is not None:
-            try:
-                ctx.close()
-            except Exception:
-                pass
+        _close_context(ctx)
 
-
-# ---------------------------------------------------------------------------
-# Public: fetch_moomoo_inputs
-# ---------------------------------------------------------------------------
 
 def fetch_moomoo_inputs(moomoo_code: str) -> dict:
-    """Retrieve the financial inputs needed for screening from Moomoo.
-
-    Uses verified fields from moomoo-api 10.11.7108:
-      - close_price_usd:    get_market_snapshot → last_price
-      - market_cap_usd:     get_market_snapshot → total_market_val
-      - employee_count:     get_company_profile → "Employees" row
-
-    BLOCKED — operating_cash_flow_ttm_usd:
-      The per-ticker TTM OCF is available via get_financials_statements
-      but requires raw field-ID parsing owned by the backend teammate.
-      This field is returned as None with a clear not-connected note.
-      It is NOT substituted with demo data or set to zero.
-
-    Returns:
-        {
-            "connected":    bool,
-            "moomoo_code":  str,
-            "inputs": {
-                "market_cap_usd":               float | None,
-                "close_price_usd":              float | None,
-                "operating_cash_flow_ttm_usd":  float | None,  # always None (blocked)
-                "employee_count":               int | None,
-            },
-            "input_notes": {
-                "market_cap_usd":               str,  # source / status
-                "close_price_usd":              str,
-                "operating_cash_flow_ttm_usd":  str,
-                "employee_count":               str,
-            },
-            "currency": str,
-            "data_timestamp": str,
-            "error": str | None,
-        }
     """
-    now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    Retrieve original-policy inputs.
 
-    if not _MOOMOO_AVAILABLE:
-        return {
-            "connected": False,
-            "moomoo_code": moomoo_code,
-            "inputs": {k: None for k in (
-                "market_cap_usd", "close_price_usd",
-                "operating_cash_flow_ttm_usd", "employee_count",
-            )},
-            "input_notes": {k: "moomoo-api not installed" for k in (
-                "market_cap_usd", "close_price_usd",
-                "operating_cash_flow_ttm_usd", "employee_count",
-            )},
-            "currency": "USD",
-            "data_timestamp": now_iso,
-            "error": "moomoo-api package is not installed.",
-        }
+    close_price_usd uses prev_close_price, not last_price.
+    Cash-flow retrieval remains unconnected.
+    Employee lookup is optional and may be unavailable.
+    """
+    retrieved_at = _now_iso()
 
-    inputs: dict = {
-        "market_cap_usd": None,
-        "close_price_usd": None,
-        "operating_cash_flow_ttm_usd": None,
-        "employee_count": None,
-    }
-    notes: dict = {
-        "market_cap_usd": "Not retrieved",
-        "close_price_usd": "Not retrieved",
+    inputs = dict.fromkeys(_INPUT_KEYS)
+
+    notes = {
+        "market_cap_usd": "Not retrieved.",
+        "close_price_usd": "Not retrieved.",
         "operating_cash_flow_ttm_usd": (
-            "Not connected — TTM OCF retrieval from get_financials_statements "
-            "requires raw field-ID parsing (backend teammate dependency)."
+            "Not connected: verified TTM operating-cash-flow "
+            "retrieval has not been implemented."
         ),
-        "employee_count": "Not retrieved",
+        "employee_count": "Not retrieved.",
     }
-    errors: list[str] = []
 
-    ctx = None
-    try:
-        ctx = _ft.OpenQuoteContext(host=_MOOMOO_HOST, port=_MOOMOO_PORT)
-
-        # ── Snapshot: price + market cap ─────────────────────────────────────
-        try:
-            ret, snap = ctx.get_market_snapshot([moomoo_code])
-            if ret == _ft.RET_OK and not snap.empty:
-                row = snap.iloc[0]
-                price = row.get("last_price")
-                mktcap = row.get("total_market_val")
-                if price is not None and str(price) not in ("nan", "None"):
-                    inputs["close_price_usd"] = float(price)
-                    notes["close_price_usd"] = f"Moomoo get_market_snapshot → last_price ({now_iso})"
-                if mktcap is not None and str(mktcap) not in ("nan", "None"):
-                    inputs["market_cap_usd"] = float(mktcap)
-                    notes["market_cap_usd"] = f"Moomoo get_market_snapshot → total_market_val ({now_iso})"
-            else:
-                errors.append(f"Snapshot failed for {moomoo_code}: {snap}")
-        except Exception as exc:
-            errors.append(f"Snapshot error: {exc}")
-
-        # ── Company profile: employee count ───────────────────────────────────
-        try:
-            ret, prof = ctx.get_company_profile(moomoo_code)
-            if ret == _ft.RET_OK and not prof.empty:
-                emp_rows = prof[prof["name"] == "Employees"]
-                if not emp_rows.empty:
-                    raw_emp = emp_rows.iloc[0]["value"]
-                    try:
-                        inputs["employee_count"] = int(str(raw_emp).replace(",", ""))
-                        notes["employee_count"] = f"Moomoo get_company_profile → Employees ({now_iso})"
-                    except (ValueError, TypeError):
-                        notes["employee_count"] = f"Employee count not parseable: {raw_emp!r}"
-                else:
-                    notes["employee_count"] = "Employee count not present in company profile"
-            else:
-                errors.append(f"Company profile failed for {moomoo_code}: {prof}")
-        except Exception as exc:
-            errors.append(f"Company profile error: {exc}")
-
-    except Exception as exc:
-        return {
-            "connected": False,
-            "moomoo_code": moomoo_code,
-            "inputs": inputs,
-            "input_notes": notes,
-            "currency": "USD",
-            "data_timestamp": now_iso,
-            "error": f"Moomoo connection error: {exc}",
-        }
-    finally:
-        if ctx is not None:
-            try:
-                ctx.close()
-            except Exception:
-                pass
-
-    return {
-        "connected": True,
+    result = {
+        "connected": False,
         "moomoo_code": moomoo_code,
         "inputs": inputs,
         "input_notes": notes,
         "currency": "USD",
-        "data_timestamp": now_iso,
-        "error": "; ".join(errors) if errors else None,
+        "data_timestamp": None,
+        "retrieved_at": retrieved_at,
+        "source": "moomoo",
+        "price_basis": "previous completed trading session close",
+        "snapshot_update_time": None,
+        "snapshot_update_time_timezone": (
+            "Provider US-market timestamp; not converted to UTC"
+        ),
+        "error": None,
     }
 
+    validation = validate_ticker(moomoo_code)
 
-# ---------------------------------------------------------------------------
-# Public: evaluate_company
-# ---------------------------------------------------------------------------
+    if (
+        not isinstance(moomoo_code, str)
+        or not moomoo_code.upper().startswith("US.")
+        or not validation["valid"]
+    ):
+        result["error"] = (
+            "Expected a verified US security code, such as US.AAPL."
+        )
+        return result
+
+    canonical_code = f"US.{validation['ticker']}"
+    result["moomoo_code"] = canonical_code
+
+    if not _MOOMOO_AVAILABLE:
+        result["error"] = "moomoo-api package is not installed."
+        return result
+
+    errors = []
+    ctx = None
+
+    try:
+        ctx = _ft.OpenQuoteContext(
+            host=_MOOMOO_HOST,
+            port=_MOOMOO_PORT,
+        )
+
+        ret, snap = ctx.get_market_snapshot([canonical_code])
+
+        if ret != _ft.RET_OK:
+            result["error"] = f"Snapshot request failed: {snap}"
+            return result
+
+        if snap.empty or "code" not in snap.columns:
+            result["error"] = "No identifiable snapshot returned."
+            return result
+
+        exact = snap[
+            snap["code"].astype(str).str.upper().eq(canonical_code)
+        ]
+
+        if len(exact) != 1:
+            result["error"] = (
+                "Snapshot did not return exactly the requested security."
+            )
+            return result
+
+        row = exact.iloc[0]
+        result["connected"] = True
+
+        provider_time = _text(row.get("update_time"))
+        result["data_timestamp"] = provider_time
+        result["snapshot_update_time"] = provider_time
+
+        price = _number(row.get("prev_close_price"))
+        market_cap = _number(row.get("total_market_val"))
+
+        if price is not None and price > 0:
+            inputs["close_price_usd"] = price
+            notes["close_price_usd"] = (
+                "Moomoo snapshot prev_close_price: previous-session "
+                "close. It is not last_price. "
+                f"Snapshot update_time={provider_time or 'unavailable'}; "
+                f"retrieved_at={retrieved_at}."
+            )
+        else:
+            notes["close_price_usd"] = (
+                "Previous closing price is unavailable or invalid."
+            )
+
+        if market_cap is not None and market_cap > 0:
+            inputs["market_cap_usd"] = market_cap
+            notes["market_cap_usd"] = (
+                "Moomoo snapshot total_market_val. "
+                f"Snapshot update_time={provider_time or 'unavailable'}; "
+                f"retrieved_at={retrieved_at}."
+            )
+        else:
+            notes["market_cap_usd"] = (
+                "Market capitalisation is unavailable or invalid."
+            )
+
+        profile_method = getattr(ctx, "get_company_profile", None)
+
+        if not callable(profile_method):
+            notes["employee_count"] = (
+                "Company-profile lookup is unavailable in this SDK."
+            )
+        else:
+            try:
+                profile_ret, profile = profile_method(canonical_code)
+
+                if profile_ret != _ft.RET_OK:
+                    notes["employee_count"] = (
+                        "Employee lookup failed; value remains unknown."
+                    )
+                    errors.append(f"Company profile failed: {profile}")
+                elif (
+                    profile.empty
+                    or not {"name", "value"}.issubset(profile.columns)
+                ):
+                    notes["employee_count"] = (
+                        "Expected employee field is absent from "
+                        "the company-profile response."
+                    )
+                else:
+                    employee_rows = profile[
+                        profile["name"]
+                        .astype(str)
+                        .str.strip()
+                        .str.casefold()
+                        .eq("employees")
+                    ]
+
+                    if len(employee_rows) != 1:
+                        notes["employee_count"] = (
+                            "Employee field is absent or ambiguous."
+                        )
+                    else:
+                        employee = _number(
+                            employee_rows.iloc[0]["value"],
+                            integer=True,
+                        )
+
+                        inputs["employee_count"] = employee
+                        notes["employee_count"] = (
+                            "Moomoo company profile Employees field; "
+                            "reporting date unverified."
+                            if employee is not None
+                            else "Employee value is not a valid count."
+                        )
+
+            except Exception as exc:
+                notes["employee_count"] = (
+                    "Employee lookup unavailable; value remains unknown."
+                )
+                errors.append(f"Company profile error: {exc}")
+
+    except Exception as exc:
+        errors.append(
+            f"Moomoo retrieval error: {type(exc).__name__}: {exc}"
+        )
+    finally:
+        _close_context(ctx)
+
+    result["error"] = "; ".join(errors) if errors else None
+    return result
+
 
 def evaluate_company(
     ticker: str,
     inputs: Optional[dict] = None,
     *,
     demo_override: Optional[str] = None,
+    source_mode: str = "supplied",
+    company_name: Optional[str] = None,
+    data_timestamp: Optional[str] = None,
 ) -> dict:
-    """Screen a company against the available criteria.
-
-    Parameters
-    ----------
-    ticker:
-        Stock ticker symbol (used as a label; not used to fetch live data).
-    inputs:
-        Dict with keys: market_cap_usd, close_price_usd,
-        operating_cash_flow_ttm_usd, employee_count.  Any may be None.
-        When None and no demo_override, the adapter returns a demo fixture.
-    demo_override:
-        Force a named demo fixture ("ACME", "BLUE", "CRST", "SMCHG").
-        Used by the UI to demonstrate scenarios explicitly.
     """
-    now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    Evaluate supplied original-policy inputs.
 
-    # ── Demo fixture path ────────────────────────────────────────────────────
-    if inputs is None or demo_override is not None:
-        return _demo_evaluate(ticker, demo_override or ticker.upper(), now_iso)
+    source_mode:
+      supplied: provenance not verified by this function
+      live: caller explicitly supplies freshly retrieved API inputs
+      cached: caller supplies a saved dataset observation
 
-    # ── Live path (uses real screening backend) ──────────────────────────────
-    if not _SCREEN_BACKEND_AVAILABLE:
-        return {
-            "mode": "error",
-            "ticker": ticker,
-            "company_name": ticker,
-            "currency": "USD",
-            "data_timestamp": now_iso,
-            "is_live": False,
-            "criteria": [],
-            "aggregate_status": "unknown",
-            "scope_note": _SCOPE_NOTE,
-            "error": (
-                "Screening backend (powerpuffmen_basic_screen) is not available. "
-                "Provide inputs manually or select a demo fixture."
-            ),
-        }
+    This function does not fetch data.
+
+    Demo requires demo_override to name a known fixture.
+    """
+    if demo_override is not None:
+        return _demo_evaluate(ticker, demo_override, _now_iso())
+
+    if inputs is None:
+        return _evaluation_error(
+            ticker,
+            "No screening inputs supplied. No demo data was substituted.",
+        )
+
+    if not isinstance(inputs, dict):
+        return _evaluation_error(ticker, "Inputs must be a dictionary.")
+
+    if source_mode not in {"supplied", "live", "cached"}:
+        return _evaluation_error(
+            ticker,
+            "source_mode must be supplied, live, or cached.",
+        )
+
+    if not _SCREEN_BACKEND_AVAILABLE or not callable(_screen_fn):
+        detail = (
+            f" Import error: {_SCREEN_IMPORT_ERROR}"
+            if _SCREEN_IMPORT_ERROR
+            else ""
+        )
+        return _evaluation_error(
+            ticker,
+            "Screening backend is unavailable." + detail,
+        )
+
+    clean_inputs = _normalise_inputs(inputs)
 
     try:
-        raw = _screen_fn(
-            market_cap_usd=inputs.get("market_cap_usd"),
-            close_price_usd=inputs.get("close_price_usd"),
-            operating_cash_flow_ttm_usd=inputs.get("operating_cash_flow_ttm_usd"),
-            employee_count=inputs.get("employee_count"),
-        )
-    except Exception as exc:
+        raw = _screen_fn(**clean_inputs)
+
+        if not isinstance(raw, dict):
+            raise ValueError("Screening backend returned a non-dictionary.")
+
+        rules = raw.get("rules")
+
+        if not isinstance(rules, list) or not rules:
+            raise ValueError("Screening backend returned no rules.")
+
+        criteria = [_rule_to_criterion(rule) for rule in rules]
+        ids = [criterion["id"] for criterion in criteria]
+
+        if len(ids) != len(set(ids)):
+            raise ValueError("Screening backend returned duplicate rule IDs.")
+
+        if set(ids) != set(_RULE_META):
+            raise ValueError(
+                "Backend rule schema differs from this adapter's "
+                "original policy. Update both components together."
+            )
+
         return {
-            "mode": "error",
+            "mode": source_mode,
             "ticker": ticker,
-            "company_name": ticker,
+            "company_name": company_name or ticker,
             "currency": "USD",
-            "data_timestamp": now_iso,
-            "is_live": False,
-            "criteria": [],
-            "aggregate_status": "unknown",
-            "scope_note": _SCOPE_NOTE,
-            "error": f"Screening tool raised an error: {exc}",
+            "data_timestamp": data_timestamp,
+            "evaluated_at": _now_iso(),
+            "criteria_version": _POLICY_VERSION,
+            "source": source_mode,
+            "is_live": source_mode == "live",
+            "criteria": criteria,
+            "aggregate_status": _aggregate_from_criteria(criteria),
+            "scope_note": raw.get("scope_note", _SCOPE_NOTE),
+            "error": None,
         }
 
-    criteria = [_rule_to_criterion(r) for r in raw["rules"]]
-    return {
-        "mode": "live",
-        "ticker": ticker,
-        "company_name": ticker,
-        "currency": "USD",
-        "data_timestamp": now_iso,
-        "is_live": True,
-        "criteria": criteria,
-        "aggregate_status": _aggregate_from_criteria(criteria),
-        "scope_note": raw.get("scope_note", _SCOPE_NOTE),
-        "error": None,
-    }
+    except Exception as exc:
+        return _evaluation_error(
+            ticker,
+            f"Screening evaluation failed: {type(exc).__name__}: {exc}",
+        )
 
-
-# ---------------------------------------------------------------------------
-# Public: analyse_company (agent integration point)
-# ---------------------------------------------------------------------------
 
 def analyse_company(ticker: str, evaluation: dict) -> dict:
-    """Request an AI-agent analysis of a screened company.
-
-    Returns a result dict:
-        { "connected": bool, "content": str | None, "error": str | None }
-
-    The IBM watsonx Orchestrate agent is NOT currently wired to this
-    prototype.  Returns connected=False with a clear explanation.
-    Do not return fabricated agent output labelled as real.
-    """
-    # Intentionally not connected.
-    # When a real agent endpoint is wired, replace this stub.
+    """Agent connection remains explicit and unimplemented."""
     return {
         "connected": False,
         "content": None,
         "error": (
-            "Analysis not connected. The IBM watsonx Orchestrate agent "
-            "endpoint has not been configured for this prototype session."
+            "Analysis not connected. The IBM watsonx Orchestrate "
+            "endpoint has not been configured for this prototype."
         ),
     }
 
 
-# ---------------------------------------------------------------------------
-# Public: check_for_changes
-# ---------------------------------------------------------------------------
+def _canonical_ticker(value):
+    if not isinstance(value, str):
+        return ""
+    value = value.strip().upper()
+    return value[3:] if value.startswith("US.") else value
 
-def check_for_changes(ticker: str, baseline: dict, current_inputs: Optional[dict]) -> dict:
-    """Compare a new evaluation against a saved baseline.
 
-    Returns:
-    {
-        "ticker": str,
-        "checked_at": str (ISO-8601),
-        "comparable": bool,
-        "not_comparable_reason": str | None,
-        "changes": [ ChangeEntry, ... ],
-        "new_evaluation": dict,    # full evaluate_company result
-        "error": str | None,
-    }
+def _policy_signature(criteria):
+    return sorted(
+        (
+            str(c.get("id", "")),
+            str(c.get("operator", "")),
+            str(c.get("threshold", "")),
+            str(c.get("unit", "")),
+            str(c.get("reporting_period", "")),
+        )
+        for c in criteria
+    )
 
-    ChangeEntry:
-    {
-        "criterion_id": str,
-        "criterion_label": str,
-        "change_type": "value_changed" | "status_transition" | "data_unavailable" | "criteria_changed",
-        "old_value_fmt": str,
-        "new_value_fmt": str,
-        "old_status": str,
-        "new_status": str,
-        "explanation": str,
-    }
+
+def check_for_changes(
+    ticker: str,
+    baseline: dict,
+    current_inputs: Optional[dict],
+    *,
+    source_mode: str = "supplied",
+    data_timestamp: Optional[str] = None,
+) -> dict:
     """
-    now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    new_eval = evaluate_company(ticker, current_inputs)
+    Compare caller-supplied current inputs against a saved baseline.
 
-    if new_eval["error"]:
-        return {
-            "ticker": ticker,
-            "checked_at": now_iso,
-            "comparable": False,
-            "not_comparable_reason": f"New evaluation failed: {new_eval['error']}",
-            "changes": [],
-            "new_evaluation": new_eval,
-            "error": new_eval["error"],
-        }
+    Does not fetch data or modify saved records.
+    Does not automatically reuse demo fixtures.
+    """
+    new_eval = evaluate_company(
+        ticker,
+        current_inputs,
+        source_mode=source_mode,
+        data_timestamp=data_timestamp,
+    )
 
-    baseline_eval = baseline.get("evaluation", {})
-    baseline_criteria = {c["id"]: c for c in baseline_eval.get("criteria", [])}
-    new_criteria = {c["id"]: c for c in new_eval.get("criteria", [])}
-
-    # Check if the set of criteria IDs changed
-    if set(baseline_criteria.keys()) != set(new_criteria.keys()):
-        return {
-            "ticker": ticker,
-            "checked_at": now_iso,
-            "comparable": False,
-            "not_comparable_reason": (
-                "The set of screening criteria has changed since the baseline was saved. "
-                "Evaluations are not directly comparable. Save a new baseline to reset."
-            ),
-            "changes": [],
-            "new_evaluation": new_eval,
-            "error": None,
-        }
-
-    changes = []
-    all_ids = set(baseline_criteria.keys()) | set(new_criteria.keys())
-    for cid in all_ids:
-        old_c = baseline_criteria.get(cid)
-        new_c = new_criteria.get(cid)
-
-        if old_c is None or new_c is None:
-            changes.append({
-                "criterion_id": cid,
-                "criterion_label": (new_c or old_c or {}).get("label", cid),
-                "change_type": "criteria_changed",
-                "old_value_fmt": old_c["observed_fmt"] if old_c else "N/A",
-                "new_value_fmt": new_c["observed_fmt"] if new_c else "N/A",
-                "old_status": old_c["status"] if old_c else "unknown",
-                "new_status": new_c["status"] if new_c else "unknown",
-                "explanation": "This criterion was added or removed since the baseline.",
-            })
-            continue
-
-        old_val = old_c["observed_value"]
-        new_val = new_c["observed_value"]
-        old_status = old_c["status"]
-        new_status = new_c["status"]
-
-        # Missing data — never treated as zero or confirmed failure
-        if new_val is None and old_val is not None:
-            changes.append({
-                "criterion_id": cid,
-                "criterion_label": new_c["label"],
-                "change_type": "data_unavailable",
-                "old_value_fmt": old_c["observed_fmt"],
-                "new_value_fmt": "Unavailable",
-                "old_status": old_status,
-                "new_status": "unknown",
-                "explanation": (
-                    f"Data for '{new_c['label']}' is no longer available. "
-                    "This is not treated as a failure — the status is Unknown."
-                ),
-            })
-            continue
-
-        status_changed = old_status != new_status
-        value_changed = old_val != new_val
-
-        if status_changed:
-            changes.append({
-                "criterion_id": cid,
-                "criterion_label": new_c["label"],
-                "change_type": "status_transition",
-                "old_value_fmt": old_c["observed_fmt"],
-                "new_value_fmt": new_c["observed_fmt"],
-                "old_status": old_status,
-                "new_status": new_status,
-                "explanation": (
-                    f"'{new_c['label']}' changed from {old_status.upper()} "
-                    f"to {new_status.upper()}. "
-                    f"Value: {old_c['observed_fmt']} → {new_c['observed_fmt']}."
-                ),
-            })
-        elif value_changed:
-            changes.append({
-                "criterion_id": cid,
-                "criterion_label": new_c["label"],
-                "change_type": "value_changed",
-                "old_value_fmt": old_c["observed_fmt"],
-                "new_value_fmt": new_c["observed_fmt"],
-                "old_status": old_status,
-                "new_status": new_status,
-                "explanation": (
-                    f"'{new_c['label']}' value changed: "
-                    f"{old_c['observed_fmt']} → {new_c['observed_fmt']} "
-                    f"(status unchanged: {new_status.upper()})."
-                ),
-            })
-
-    return {
+    result = {
         "ticker": ticker,
-        "checked_at": now_iso,
-        "comparable": True,
+        "checked_at": _now_iso(),
+        "comparable": False,
         "not_comparable_reason": None,
-        "changes": changes,
+        "changes": [],
         "new_evaluation": new_eval,
         "error": None,
     }
 
+    if new_eval.get("error"):
+        result["error"] = new_eval["error"]
+        result["not_comparable_reason"] = (
+            f"New evaluation failed: {new_eval['error']}"
+        )
+        return result
 
-# ---------------------------------------------------------------------------
-# Demo fixtures
-# ---------------------------------------------------------------------------
+    if not isinstance(baseline, dict):
+        result["not_comparable_reason"] = "Invalid saved baseline."
+        return result
 
-def _demo_evaluate(ticker: str, fixture_key: str, ts: str) -> dict:
-    """Return a named demo fixture.  All results are explicitly mode='demo'."""
-    fixtures = _DEMO_FIXTURES()
-    fixture = fixtures.get(fixture_key.upper(), fixtures["ACME"])
-    result = copy.deepcopy(fixture)
-    result["ticker"] = ticker
-    result["data_timestamp"] = ts
-    result["mode"] = "demo"
-    result["is_live"] = False
+    baseline_eval = baseline.get("evaluation", {})
+
+    if not isinstance(baseline_eval, dict):
+        result["not_comparable_reason"] = "Invalid saved evaluation."
+        return result
+
+    saved_ticker = baseline_eval.get("ticker") or baseline.get("ticker")
+
+    if _canonical_ticker(saved_ticker) != _canonical_ticker(ticker):
+        result["not_comparable_reason"] = (
+            "Baseline belongs to a different or unidentified company."
+        )
+        return result
+
+    if baseline_eval.get("error"):
+        result["not_comparable_reason"] = (
+            "The saved baseline contains an evaluation error."
+        )
+        return result
+
+    if baseline_eval.get("mode") not in {"supplied", "live", "cached"}:
+        result["not_comparable_reason"] = (
+            "Baseline data mode is demo, unknown, or unsupported. "
+            "Save a new non-demo baseline."
+        )
+        return result
+
+    if baseline_eval.get("currency") != new_eval.get("currency"):
+        result["not_comparable_reason"] = "Evaluation currencies differ."
+        return result
+
+    if (
+        baseline_eval.get("criteria_version")
+        != new_eval.get("criteria_version")
+    ):
+        result["not_comparable_reason"] = (
+            "Criteria version changed or is missing. "
+            "Review the current policy and save a new baseline."
+        )
+        return result
+
+    old_list = baseline_eval.get("criteria", [])
+    new_list = new_eval.get("criteria", [])
+
+    if not old_list or not new_list:
+        result["not_comparable_reason"] = (
+            "Both evaluations must contain screening criteria."
+        )
+        return result
+
+    old_ids = [c.get("id") for c in old_list]
+    new_ids = [c.get("id") for c in new_list]
+
+    if (
+        len(old_ids) != len(set(old_ids))
+        or len(new_ids) != len(set(new_ids))
+    ):
+        result["not_comparable_reason"] = (
+            "Duplicate criterion IDs prevent reliable comparison."
+        )
+        return result
+
+    if _policy_signature(old_list) != _policy_signature(new_list):
+        result["not_comparable_reason"] = (
+            "Criteria, thresholds, units, operators, or reporting "
+            "periods changed. Review and save a new baseline."
+        )
+        return result
+
+    old_by_id = {c["id"]: c for c in old_list}
+    changes = []
+
+    for new_c in new_list:
+        old_c = old_by_id[new_c["id"]]
+
+        old_value = _number(old_c.get("observed_value"))
+        new_value = _number(new_c.get("observed_value"))
+
+        old_status = (
+            "unknown" if old_value is None
+            else old_c.get("status", "unknown")
+        )
+        new_status = (
+            "unknown" if new_value is None
+            else new_c.get("status", "unknown")
+        )
+
+        old_fmt = (
+            "Unknown" if old_value is None
+            else old_c.get("observed_fmt", str(old_value))
+        )
+        new_fmt = (
+            "Unknown" if new_value is None
+            else new_c.get("observed_fmt", str(new_value))
+        )
+
+        if new_value is None and old_value is not None:
+            change_type = "data_unavailable"
+            explanation = (
+                f"Data for '{new_c['label']}' is now unavailable. "
+                "This is unknown, not a confirmed rule failure."
+            )
+            new_fmt = "Unavailable"
+
+        elif old_status != new_status:
+            change_type = "status_transition"
+            explanation = (
+                f"'{new_c['label']}' changed from "
+                f"{old_status.upper()} to {new_status.upper()}. "
+                f"Value: {old_fmt} -> {new_fmt}."
+            )
+
+        elif old_value != new_value:
+            change_type = "value_changed"
+            explanation = (
+                f"'{new_c['label']}' changed from "
+                f"{old_fmt} to {new_fmt}; status remains "
+                f"{new_status.upper()}."
+            )
+
+        else:
+            continue
+
+        changes.append({
+            "criterion_id": new_c["id"],
+            "criterion_label": new_c["label"],
+            "change_type": change_type,
+            "old_value_fmt": old_fmt,
+            "new_value_fmt": new_fmt,
+            "old_status": old_status,
+            "new_status": new_status,
+            "explanation": explanation,
+        })
+
+    result["comparable"] = True
+    result["changes"] = changes
     return result
 
 
 def _DEMO_FIXTURES() -> dict:
-    """Build and return demo fixtures (called lazily to keep module load fast)."""
+    """Named synthetic fixtures; no API or backend calls."""
+    specifications = {
+        "ACME": (15_000_000_000, 42.50, 850_000_000, 3200),
+        "BLUE": (5_500_000_000, 18.75, -120_000_000, 870),
+        "CRST": (8_200_000_000, 67.00, 310_000_000, None),
+        "SMCHG": (12_000_000_000, 55.00, 200_000_000, 1500),
+    }
 
-    def _make_criteria(rules_raw):
-        return [_rule_to_criterion(r) for r in rules_raw]
+    definitions = (
+        (
+            "market_cap_range",
+            "2,000,000,000 <= x <= 100,000,000,000",
+            lambda value: 2_000_000_000 <= value <= 100_000_000_000,
+        ),
+        ("min_close_price", "x >= 10", lambda value: value >= 10),
+        (
+            "positive_operating_cash_flow",
+            "x > 0",
+            lambda value: value > 0,
+        ),
+        ("min_employee_count", "x >= 20", lambda value: value >= 20),
+    )
 
-    # ── ACME: all pass ───────────────────────────────────────────────────────
-    acme_rules = [
-        {"rule_name": "market_cap_range",            "observed_value": 15_000_000_000, "threshold": "2,000,000,000 <= x <= 100,000,000,000", "status": "PASS", "explanation": "Market cap is within USD 2B–100B."},
-        {"rule_name": "min_close_price",              "observed_value": 42.50,          "threshold": "x >= 10", "status": "PASS", "explanation": "Close price meets the USD 10 minimum."},
-        {"rule_name": "positive_operating_cash_flow", "observed_value": 850_000_000,    "threshold": "x > 0",   "status": "PASS", "explanation": "Operating cash flow is positive."},
-        {"rule_name": "min_employee_count",           "observed_value": 3_200,          "threshold": "x >= 20", "status": "PASS", "explanation": "Employee count meets the minimum of 20."},
-    ]
-    acme_criteria = _make_criteria(acme_rules)
+    fixtures = {}
 
-    # ── BLUE: OCF FAIL ───────────────────────────────────────────────────────
-    blue_rules = [
-        {"rule_name": "market_cap_range",            "observed_value": 5_500_000_000,   "threshold": "2,000,000,000 <= x <= 100,000,000,000", "status": "PASS", "explanation": "Market cap is within USD 2B–100B."},
-        {"rule_name": "min_close_price",              "observed_value": 18.75,           "threshold": "x >= 10", "status": "PASS", "explanation": "Close price meets the USD 10 minimum."},
-        {"rule_name": "positive_operating_cash_flow", "observed_value": -120_000_000,    "threshold": "x > 0",   "status": "FAIL", "explanation": "Operating cash flow is not strictly positive."},
-        {"rule_name": "min_employee_count",           "observed_value": 870,             "threshold": "x >= 20", "status": "PASS", "explanation": "Employee count meets the minimum of 20."},
-    ]
-    blue_criteria = _make_criteria(blue_rules)
+    for name, values in specifications.items():
+        rules = []
 
-    # ── CRST: employees UNVERIFIED ───────────────────────────────────────────
-    crst_rules = [
-        {"rule_name": "market_cap_range",            "observed_value": 8_200_000_000,  "threshold": "2,000,000,000 <= x <= 100,000,000,000", "status": "PASS", "explanation": "Market cap is within USD 2B–100B."},
-        {"rule_name": "min_close_price",              "observed_value": 67.00,          "threshold": "x >= 10", "status": "PASS", "explanation": "Close price meets the USD 10 minimum."},
-        {"rule_name": "positive_operating_cash_flow", "observed_value": 310_000_000,    "threshold": "x > 0",   "status": "PASS", "explanation": "Operating cash flow is positive."},
-        {"rule_name": "min_employee_count",           "observed_value": None,           "threshold": "x >= 20", "status": "UNVERIFIED", "explanation": "Employee count not provided."},
-    ]
-    crst_criteria = _make_criteria(crst_rules)
+        for (rule_id, threshold, predicate), value in zip(
+            definitions, values
+        ):
+            status = (
+                "UNVERIFIED"
+                if value is None
+                else "PASS" if predicate(value) else "FAIL"
+            )
 
-    # ── SMCHG: simulated-change demo ─────────────────────────────────────────
-    # Baseline: ACME-like (all pass); "new" state: OCF goes negative (fail).
-    # Used to demonstrate a pass→fail transition without touching live data.
-    smchg_baseline_rules = [
-        {"rule_name": "market_cap_range",            "observed_value": 12_000_000_000, "threshold": "2,000,000,000 <= x <= 100,000,000,000", "status": "PASS", "explanation": "Market cap is within USD 2B–100B."},
-        {"rule_name": "min_close_price",              "observed_value": 55.00,          "threshold": "x >= 10", "status": "PASS", "explanation": "Close price meets the USD 10 minimum."},
-        {"rule_name": "positive_operating_cash_flow", "observed_value": 200_000_000,    "threshold": "x > 0",   "status": "PASS", "explanation": "Operating cash flow is positive."},
-        {"rule_name": "min_employee_count",           "observed_value": 1_500,          "threshold": "x >= 20", "status": "PASS", "explanation": "Employee count meets the minimum of 20."},
-    ]
-    smchg_criteria = _make_criteria(smchg_baseline_rules)
+            rules.append({
+                "rule_name": rule_id,
+                "observed_value": value,
+                "threshold": threshold,
+                "status": status,
+                "explanation": "Synthetic demo fixture.",
+            })
 
-    def _make(name, currency, criteria, agg):
-        return {
+        criteria = [_rule_to_criterion(rule) for rule in rules]
+
+        fixtures[name] = {
             "mode": "demo",
             "ticker": name,
-            "company_name": _DEMO_COMPANY_NAMES.get(name, name),
-            "currency": currency,
+            "company_name": _DEMO_COMPANY_NAMES[name],
+            "currency": "USD",
             "data_timestamp": _DEMO_TS,
+            "evaluated_at": _DEMO_TS,
+            "criteria_version": _POLICY_VERSION,
+            "source": "synthetic fixture",
             "is_live": False,
             "criteria": criteria,
-            "aggregate_status": agg,
+            "aggregate_status": _aggregate_from_criteria(criteria),
             "scope_note": _SCOPE_NOTE,
             "error": None,
         }
 
-    return {
-        "ACME":  _make("ACME",  "USD", acme_criteria, "pass"),
-        "BLUE":  _make("BLUE",  "USD", blue_criteria, "fail"),
-        "CRST":  _make("CRST",  "USD", crst_criteria, "unknown"),
-        "SMCHG": _make("SMCHG", "USD", smchg_criteria, "pass"),
-    }
+    return fixtures
 
 
-# ---------------------------------------------------------------------------
-# Simulated-change scenario helper
-# ---------------------------------------------------------------------------
+def _demo_evaluate(ticker: str, fixture_key: str, ts: str) -> dict:
+    """An unknown fixture is an error, never an ACME fallback."""
+    if not isinstance(fixture_key, str):
+        return _evaluation_error(ticker, "Invalid demo fixture name.")
+
+    key = fixture_key.strip().upper()
+    fixtures = _DEMO_FIXTURES()
+
+    if key not in fixtures:
+        return _evaluation_error(
+            ticker,
+            f"Unknown demo fixture '{key}'. "
+            "Choose ACME, BLUE, CRST, or SMCHG.",
+        )
+
+    result = copy.deepcopy(fixtures[key])
+    result["requested_ticker"] = ticker
+    result["evaluated_at"] = ts
+
+    # Preserve fictional identity and original fixture observation time.
+    result["ticker"] = key
+    return result
+
 
 def get_simulated_change_scenario() -> dict:
-    """Return (baseline_eval, changed_eval) for the simulated-change demo.
+    """Explicit synthetic PASS-to-FAIL scenario; no external writes."""
+    baseline = copy.deepcopy(_DEMO_FIXTURES()["SMCHG"])
+    changed = copy.deepcopy(baseline)
 
-    Demonstrates a PASS → FAIL transition on the OCF criterion.
-    Clearly labelled as DEMO — does not call any live data source.
-    """
-    fixtures = _DEMO_FIXTURES()
-    baseline_eval = copy.deepcopy(fixtures["SMCHG"])
+    for criterion in changed["criteria"]:
+        if criterion["id"] == "positive_operating_cash_flow":
+            criterion["observed_value"] = -45_000_000
+            criterion["observed_fmt"] = _fmt_usd(-45_000_000)
+            criterion["status"] = "fail"
+            criterion["explanation"] = (
+                "Synthetic change: operating cash flow became negative."
+            )
 
-    # Build the "changed" evaluation: OCF flips negative
-    changed_rules = [
-        {"rule_name": "market_cap_range",            "observed_value": 12_000_000_000, "threshold": "2,000,000,000 <= x <= 100,000,000,000", "status": "PASS", "explanation": "Market cap is within USD 2B–100B."},
-        {"rule_name": "min_close_price",              "observed_value": 55.00,          "threshold": "x >= 10", "status": "PASS", "explanation": "Close price meets the USD 10 minimum."},
-        {"rule_name": "positive_operating_cash_flow", "observed_value": -45_000_000,    "threshold": "x > 0",   "status": "FAIL", "explanation": "Operating cash flow is not strictly positive."},
-        {"rule_name": "min_employee_count",           "observed_value": 1_500,          "threshold": "x >= 20", "status": "PASS", "explanation": "Employee count meets the minimum of 20."},
-    ]
-    changed_criteria = [_rule_to_criterion(r) for r in changed_rules]
-    changed_eval = copy.deepcopy(baseline_eval)
-    changed_eval["criteria"] = changed_criteria
-    changed_eval["aggregate_status"] = "fail"
-    changed_eval["data_timestamp"] = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    changed["aggregate_status"] = _aggregate_from_criteria(
+        changed["criteria"]
+    )
+    changed["data_timestamp"] = "2025-01-02T00:00:00Z"
+    changed["evaluated_at"] = _now_iso()
 
-    return {"baseline": baseline_eval, "changed": changed_eval}
+    return {"baseline": baseline, "changed": changed}
