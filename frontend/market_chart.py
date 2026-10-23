@@ -10,6 +10,14 @@ import streamlit as st
 
 
 def fetch_daily_candles(ticker, days):
+    import os
+
+    if os.environ.get("ENABLE_MOOMOO_CHART") != "1":
+        raise RuntimeError(
+            "Moomoo daily candles are disabled in this deployment. "
+            "This feature requires a reachable OpenD gateway. "
+            "Synthetic screening and IBM agent analysis are separate features."
+        )
     import moomoo as mm
 
     ticker = ticker.strip().upper()
