@@ -78,3 +78,33 @@ h1{font-size:34px}
 .decision .text-button{padding:0}
 .verdict{flex-direction:column;gap:8px}
 .price-chart .key.close{position:static;background:var(--teal);font-size:0}
+/* Navigation links */
+a.nav{text-decoration:none}
+/* Search */
+.search-row{margin:18px 0 16px}
+.search-input{width:100%;max-width:560px;border:1px solid #cdd9cf;border-radius:6px;padding:12px 14px;font-size:14px;background:white}
+.search-layout{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:start}
+@media(max-width:900px){.search-layout{grid-template-columns:1fr}}
+.hits{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.hits li+li{border-top:1px solid #eef1eb}
+.hit{display:flex;gap:12px;align-items:baseline;width:100%;background:white;border:0;text-align:left;padding:11px 14px;font-size:12px}
+.hit:hover{background:#f4f7f1}
+.hit.selected{background:#e6efe8;box-shadow:inset 3px 0 0 var(--teal)}
+.hit b{min-width:56px;font-weight:600}
+.hit span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hit small{color:var(--muted);font-size:10px}
+.saved-tag{color:var(--teal)!important;font-weight:600}
+.preview{border:1px solid var(--line);border-radius:6px;padding:18px;background:#fbfcfa;position:sticky;top:16px}
+.preview-name{font-family:"IBM Plex Serif",Georgia,serif;font-size:19px;font-weight:500;margin-bottom:12px}
+.preview dl{display:grid;grid-template-columns:90px 1fr;gap:8px 10px;font-size:12px;margin:0 0 16px}
+.preview dt{color:var(--muted)}
+.preview dd{margin:0}
+/* Comparison */
+table.compare td{vertical-align:top}
+table.compare td small{white-space:normal}
+.badge.strong{font-weight:700;font-size:10px}
+.row-actions{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.row-actions .text-button{padding:0}
+.text-button.danger{color:#ad5144}
+.text-button:disabled{opacity:.5;cursor:default}
+.text-button.inline{padding:0;font-size:inherit}

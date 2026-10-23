@@ -205,3 +205,41 @@ export async function fetchScenarios(): Promise<Scenario[]> {
   if (!response.ok) throw new ApiError(`Request failed (HTTP ${response.status}).`);
   return (await response.json()) as Scenario[];
 }
+
+export interface CompanyHit {
+  code: string;
+  ticker: string;
+  name: string;
+  exchange_type?: string;
+  listing_date?: string;
+}
+
+export interface CompanySearch {
+  query: string;
+  source?: string;
+  directory_size?: number;
+  directory_loaded_at?: string;
+  total_matches: number;
+  results: CompanyHit[];
+}
+
+export async function searchCompanies(q: string, signal?: AbortSignal): Promise<CompanySearch> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/companies?q=${encodeURIComponent(q)}`, { signal });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw err;
+    throw new ApiError("Could not reach the local API.");
+  }
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    // fall through
+  }
+  if (!response.ok) {
+    const detail = body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : null;
+    throw new ApiError(typeof detail === "string" ? detail : `Search failed (HTTP ${response.status}).`);
+  }
+  return body as CompanySearch;
+}

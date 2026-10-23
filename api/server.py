@@ -206,3 +206,89 @@ def scenarios():
             ]
         out.append(item)
     return out
+
+
+# Company directory for search: the full US stock list from Moomoo OpenD, built
+# once per API process in a separate worker (api/directory.py) and kept in memory.
+DIRECTORY_TIMEOUT_SECONDS = 60
+_directory = {"companies": None, "built_at": None}
+_directory_lock = threading.Lock()
+# The provider uses this date when the real listing date is unknown.
+_PLACEHOLDER_DATES = {"1970-01-01"}
+
+
+def _build_directory():
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = Path(tmp) / "directory.json"
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "api.directory", str(out_path)],
+                cwd=ROOT, capture_output=True, text=True,
+                timeout=DIRECTORY_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail=(
+                "Loading the company list timed out. Moomoo OpenD may be "
+                "unresponsive or logged out."))
+        if not out_path.exists():
+            logger.error("Directory worker exited with code %s:\n%s", proc.returncode, proc.stderr)
+            raise HTTPException(status_code=502, detail=(
+                f"The company list could not be loaded (exit code {proc.returncode})."))
+        payload = json.loads(out_path.read_text(encoding="utf-8"))
+    if not payload.get("ok"):
+        logger.warning("Directory load failed: %s", payload.get("error"))
+        raise HTTPException(status_code=502, detail=(
+            f"The company list could not be loaded: {payload.get('error')}"))
+    companies = []
+    for c in payload["companies"]:
+        if c.get("listing_date") in _PLACEHOLDER_DATES:
+            c = {k: v for k, v in c.items() if k != "listing_date"}
+        companies.append(c)
+    return companies
+
+
+def _get_directory():
+    with _directory_lock:
+        if _directory["companies"] is None:
+            with _opend_lock:
+                _directory["companies"] = _build_directory()
+            _directory["built_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        return _directory["companies"], _directory["built_at"]
+
+
+def _rank(company, q):
+    ticker, name = company["ticker"].upper(), company["name"].upper()
+    if ticker == q:
+        return 0
+    if ticker.startswith(q):
+        return 1
+    if name.startswith(q):
+        return 2
+    if any(word.startswith(q) for word in name.split()):
+        return 3
+    if q in name:
+        return 4
+    return None
+
+
+@app.get("/api/companies")
+def search_companies(q: str = "", limit: int = 12):
+    """Search the provider's US stock list by ticker or company name."""
+    query = " ".join(q.upper().split())
+    if not query:
+        return {"query": q, "results": [], "total_matches": 0}
+    companies, built_at = _get_directory()
+    ranked = []
+    for c in companies:
+        r = _rank(c, query)
+        if r is not None:
+            ranked.append((r, len(c["ticker"]), c["ticker"], c))
+    ranked.sort(key=lambda t: t[:3])
+    return {
+        "query": q,
+        "source": "Moomoo OpenD US stock list",
+        "directory_size": len(companies),
+        "directory_loaded_at": built_at,
+        "total_matches": len(ranked),
+        "results": [t[3] for t in ranked[:max(1, min(limit, 50))]],
+    }
