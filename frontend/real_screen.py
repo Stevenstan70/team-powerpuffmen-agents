@@ -65,18 +65,34 @@ def retrieve_real_screen(ticker, *, include_statement_profit=False):
         if not math.isfinite(volume) or volume < 0 or not volume.is_integer():
             raise ValueError("Snapshot volume is not a nonnegative share count.")
 
+        # research_brief_patch_v1: optional evidence can fail independently.
         statement_evidence = None
+        warnings = []
+        statement_status = "not_requested"
         if include_statement_profit:
             from frontend.statement_evidence import extract_net_profit_evidence
 
-            ret, statement_payload = ctx.get_financials_statements(code=code)
-            if ret != mm.RET_OK:
-                raise RuntimeError(
-                    f"Financial-statement retrieval failed: {statement_payload}"
+            statement_status = "unavailable"
+            stage = "statement_retrieval"
+            try:
+                ret, statement_payload = ctx.get_financials_statements(code=code)
+                if ret != mm.RET_OK:
+                    raise RuntimeError("Provider did not return statement evidence.")
+                stage = "statement_validation"
+                statement_evidence = extract_net_profit_evidence(
+                    statement_payload, code
                 )
-            statement_evidence = extract_net_profit_evidence(
-                statement_payload, code
-            )
+                statement_status = "validated"
+            except Exception as exc:
+                warnings.append({
+                    "stage": stage,
+                    "error_type": type(exc).__name__,
+                    "message": (
+                        "Optional statement evidence was unavailable or failed "
+                        "validation. Net profit remains unavailable. "
+                        "The screen continued using validated snapshot volume."
+                    ),
+                })
 
         inputs = {
             "market_cap_usd": None,
@@ -135,6 +151,8 @@ def retrieve_real_screen(ticker, *, include_statement_profit=False):
             "raw": raw,
             "code": code,
             "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "statement_status": statement_status,
+            "warnings": warnings,
         }
     finally:
         if ctx is not None:
@@ -227,6 +245,27 @@ def render_real_screen():
                 st.caption("Statement provenance: " + criterion["label"])
                 st.json(provenance)
     st.caption(e["scope_note"])
+
+    from frontend.research_brief import build_research_brief
+
+    for warning in result.get("warnings", []):
+        st.warning(warning["message"])
+
+    brief = build_research_brief(result)
+    st.subheader("Preliminary research brief")
+    st.caption(
+        "Deterministic evidence report. Not cloud-agent analysis. "
+        "News review and scenario-change approval are not included yet."
+    )
+    with st.expander("Read the research brief", expanded=True):
+        st.markdown(brief)
+    st.download_button(
+        "Download research brief",
+        data=brief,
+        file_name=f"InvestIQ_{e['ticker']}_research_brief.md",
+        mime="text/markdown",
+        key="download_real_research_brief",
+    )
     st.info(
         "Real-company cloud-agent analysis and monitoring are not enabled here. "
         "These results are kept separate from synthetic baselines and approvals."
