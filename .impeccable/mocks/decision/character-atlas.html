@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>PPM Finance — Character Atlas</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f6eff8;color:#26334a;font:15px/1.45 "Segoe UI",sans-serif}
+.shell{display:grid;grid-template-columns:218px 1fr;min-height:100vh}.nav{background:#26334a;color:#fff;padding:30px 22px}
+.brand{font-size:22px;font-weight:750;letter-spacing:-.04em}.nav p{color:#d5d6df;margin:5px 0 35px}.nav a{display:block;color:#e3dfeb;text-decoration:none;padding:12px;margin:4px 0;border-radius:9px}.nav a.active{background:#b8e1dd;color:#1e3b3b;font-weight:700}
+main{padding:35px 42px;max-width:1300px}.top{display:flex;justify-content:space-between;align-items:center}.demo{background:#ffd278;padding:8px 12px;border-radius:20px;font-weight:700}
+h1{font-size:34px;letter-spacing:-.04em;margin:10px 0 4px}.muted{color:#5c6676}.search{margin:25px 0;background:#fff;border:1px solid #d9d1df;border-radius:10px;padding:14px;color:#687381}
+.grid{display:grid;grid-template-columns:1.2fr .8fr;gap:18px}.panel{background:#fff;border:1px solid #ded8e4;border-radius:13px;padding:21px}.profile{display:flex;align-items:center;gap:15px}.badge{background:#b8e1dd;border:3px solid white;outline:1px solid #b9c4c6;border-radius:18px;padding:12px 17px;font-size:22px;font-weight:800}.profile h2{margin:0;font-size:23px}.ribbon{margin-left:auto;background:#ffd278;padding:8px 13px;border-radius:20px;font-weight:700}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:20px}.metric{background:#f6eff8;padding:13px;border-radius:9px}.metric small{display:block;color:#5c6676}.metric b{font-variant-numeric:tabular-nums;font-size:19px}
+h3{font-size:16px;margin:0 0 12px}.row{display:grid;grid-template-columns:1fr 90px 92px;gap:10px;padding:10px 0;border-bottom:1px solid #ece8ef}.pass{color:#246348;font-weight:700}.unknown{color:#805d12;font-weight:700}
+.chart{height:145px;display:flex;align-items:end;gap:14px;border-bottom:1px solid #b5bdc7;padding:0 10px}.bar{background:#81bfb8;border-radius:6px 6px 0 0;flex:1}.years{display:flex;justify-content:space-around;color:#5c6676;font-size:12px;padding-top:6px}.caption{font-size:12px;color:#5c6676;margin-top:10px}
+.roster{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:17px}.cell{border:1px solid #e0d9e5;background:#fff;border-radius:10px;padding:12px}.cell.active{outline:2px solid #e7b23d}.cell strong{display:block}.cell small{color:#5c6676}
+@media(max-width:850px){.shell{grid-template-columns:1fr}.nav{padding:18px}.nav p{margin:4px 0 10px}.nav a{display:inline-block}.grid{grid-template-columns:1fr}main{padding:24px}.roster{grid-template-columns:repeat(2,1fr)}}
+</style>
+<div class="shell"><nav class="nav"><div class="brand">PPM Finance</div><p>Research workspace</p><a class="active">Screen</a><a>Tracked companies</a><a>Approval</a><a>About &amp; demo</a></nav>
+<main><div class="top"><span>Company screening</span><span class="demo">DEMO DATA</span></div><h1>ACME <span class="muted">/ company profile</span></h1><div class="muted">Synthetic fixture · no live market connection</div>
+<div class="search">Search a ticker symbol… <b style="float:right">Analyse</b></div>
+<div class="grid"><section class="panel"><div class="profile"><div class="badge">A</div><div><h2>Acme Galactic Ltd</h2><span class="muted">US.ACME · Demo company</span></div><span class="ribbon">SELECTED</span></div>
+<div class="metrics"><div class="metric"><small>Market cap</small><b>$15.0B</b></div><div class="metric"><small>Last close</small><b>$42.50</b></div><div class="metric"><small>Employees</small><b>3,200</b></div></div>
+<h3 style="margin-top:22px">Screening criteria</h3><div class="row"><span>Market cap range</span><span>$15.0B</span><span class="pass">PASS</span></div><div class="row"><span>Close price ≥ $10</span><span>$42.50</span><span class="pass">PASS</span></div><div class="row"><span>Operating cash flow</span><span>$850M</span><span class="pass">PASS</span></div><div class="row"><span>Employee count ≥ 20</span><span>3,200</span><span class="pass">PASS</span></div>
+</section><section class="panel"><h3>Revenue by year</h3><span class="muted">Illustrative values · synthetic demo</span><div class="chart"><i class="bar" style="height:40%"></i><i class="bar" style="height:50%"></i><i class="bar" style="height:62%"></i><i class="bar" style="height:73%"></i><i class="bar" style="height:90%"></i></div><div class="years"><span>2021</span><span>2022</span><span>2023</span><span>2024</span><span>2025</span></div><div class="caption">Illustrative only—not historical company performance.</div></section></div>
+<h3 style="margin:23px 0 10px">Your tracked roster</h3><div class="roster"><div class="cell active"><strong>ACME</strong><small>Selected · Demo</small></div><div class="cell"><strong>BLUE</strong><small>Needs review</small></div><div class="cell"><strong>CRST</strong><small>Unknown data</small></div><div class="cell"><strong>SMCHG</strong><small>Simulated change</small></div></div></main></div>
+</html>

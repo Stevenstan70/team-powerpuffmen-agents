@@ -1,0 +1,131 @@
+{
+  "title": "Choose PPM Finance's visual direction",
+  "question": "Pick the visual world that should shape the redesigned screening and monitoring workspace. Each keeps the existing product behavior and labels synthetic history as demo data.",
+  "options": [
+    {
+      "id": "character-atlas",
+      "kind": "assigned",
+      "label": "Character Atlas",
+      "kicker": "THE ROLL",
+      "lineage": "ranked character-goods catalogs",
+      "thesis": "A friendly, finite roster makes each company easy to scan and revisit.",
+      "palette": ["#F6EFF8", "#B8E1DD", "#FFD278", "#26334A", "#FFFFFF"],
+      "materials": ["soft pastel fields", "white keylines", "single-color ribbons"],
+      "viewport": "PPM Finance opens on the Screen workspace: standard navigation, a ticker search, one selected-company profile, clear criterion states, and a small, explicitly synthetic demo growth chart. A tracked-company roster uses whole, responsive cells. The signature move is one saturated ribbon that marks the selected ticker and follows its state across the roster and review flow.",
+      "risk": "The catalog language can feel playful rather than financially serious; keep company data and state labels more prominent than decorative treatment.",
+      "html": ".impeccable/mocks/decision/character-atlas.html",
+      "htmlFrame": "1440x900"
+    },
+    {
+      "id": "shareholder-report",
+      "kind": "pick",
+      "label": "Shareholder Report",
+      "kicker": "IMPECCABLE’S PICK",
+      "lineage": "annual reports and investor letters",
+      "thesis": "A clear editorial hierarchy turns screening evidence into a readable research brief.",
+      "palette": ["#F3F1E9", "#183C32", "#C6D6C7", "#D45B43", "#252B28"],
+      "materials": ["warm report stock", "fine rules", "tabular figures"],
+      "viewport": "The standard app navigation frames a focused company screen. A strong ticker heading leads into four criterion results, each paired with its value and source state; an annotated multi-year demo chart sits beside the criteria when synthetic history is shown. The signature move is a precise chart annotation that connects a change point to the criterion it may affect.",
+      "risk": "Annual-report styling is familiar; it must stay product-like and interactive rather than becoming a static editorial page.",
+      "html": ".impeccable/mocks/decision/shareholder-report.html",
+      "htmlFrame": "1440x900"
+    },
+    {
+      "id": "acetate-manual",
+      "kind": "challenger",
+      "catalogId": "rw-manual-acetate-tab-board",
+      "label": "Acetate Reference Manual",
+      "verdict": "wins",
+      "lineage": "tabbed reference manuals with clear overlays",
+      "thesis": "Each screening rule reads like a concise, navigable reference entry.",
+      "palette": ["#F4F0E4", "#D4A52B", "#1E5145", "#C44A38", "#23312D"],
+      "materials": ["translucent information layers", "solid section hues", "hard-edged rules"],
+      "viewport": "Familiar app navigation anchors the Screen, Tracking, and Approval jobs. The main result pairs a readable company summary with four directly comparable rules; an expandable layer explains thresholds and data sources. A multi-year demo chart uses one clear year axis. The signature move is a hinged, two-step reveal for threshold and source details, never an overlay that obscures the result.",
+      "case": "Wins on both audience identification and product clarity: researchers value explainable rules, and the indexed reference pattern teaches each threshold without changing familiar controls.",
+      "risk": "Too many reveal layers could slow scanning; keep primary evidence visible and explanations optional.",
+      "html": ".impeccable/mocks/decision/acetate-manual.html",
+      "htmlFrame": "1440x900"
+    },
+    {
+      "id": "timetable-slides",
+      "kind": "challenger",
+      "catalogId": "rw-timetable-slide-rack",
+      "label": "Time-Series Timetable",
+      "verdict": "wins",
+      "lineage": "pocket timetables and chronological tables",
+      "thesis": "A disciplined year-by-year rhythm makes comparisons and changes legible.",
+      "palette": ["#E9B93F", "#F7F2E7", "#394653", "#A74737", "#255442"],
+      "materials": ["goldenrod ground", "opaque reading panes", "ruled data columns"],
+      "viewport": "Standard navigation keeps the product recognizable. A company header leads into a multi-year demo growth chart, followed by a chronological evidence table and the current pass/fail/unknown screen. The signature move is a shared year cursor: selecting a year highlights the matching chart point and table column.",
+      "case": "Wins on both axes: the timeline directly answers the request to compare growth across years, while shared year selection clarifies how chart and screening evidence relate.",
+      "risk": "A one-size, highly compressed data rhythm may reduce readability; use clear type hierarchy and switch to stacked rows on narrow screens.",
+      "html": ".impeccable/mocks/decision/timetable-slides.html",
+      "htmlFrame": "1440x900"
+    },
+    {
+      "id": "ticket-wallet",
+      "kind": "challenger",
+      "catalogId": "vernacular-ephemera-jet-age-ticket-wallet",
+      "label": "Research Journey",
+      "verdict": "competitive",
+      "lineage": "jet-age ticket wallets and sequential coupons",
+      "thesis": "Screen, save, compare, and review feel like clear steps in one research journey.",
+      "palette": ["#172D49", "#F4F2EC", "#C83D37", "#72538D", "#2A684D"],
+      "materials": ["crisp coupon stock", "carbon numerals", "hairline dividers"],
+      "viewport": "Standard navigation stays fixed while the company workflow is expressed as four familiar steps: Screen, Results, Track, and Review. The first view prioritizes the selected ticker and its criteria, with the current step and next action always visible. The signature move is a persistent progress strip that records completed and pending research steps without implying a trade.",
+      "case": "Competitive: the journey makes the workflow unusually easy to learn, but its sequential metaphor is less natural for researchers who move repeatedly between companies and criteria.",
+      "risk": "A step-by-step presentation could imply a one-way process; all areas must remain directly reachable.",
+      "html": ".impeccable/mocks/decision/ticket-wallet.html",
+      "htmlFrame": "1440x900"
+    },
+    {
+      "id": "exposure-record",
+      "kind": "challenger",
+      "catalogId": "operate-b-exposure-record-zone-sheets",
+      "label": "Exposure Record",
+      "verdict": "declined",
+      "lineage": "darkroom exposure records and tonal zone sheets",
+      "thesis": "Layered marks make the magnitude and confidence of evidence visible.",
+      "palette": ["#F1EEE8", "#29333B", "#C33C9B", "#D6D1C7", "#55716D"],
+      "materials": ["tonal steps", "translucent overlays", "cross-hatching"],
+      "viewport": "A company result sits over a tonal scale; criterion values, missing inputs, and status changes are distinguished through labeled marks and hatching. The signature move is an annotated change overlay that never treats missing data as a failure.",
+      "case": "Declined: it offers an inventive way to encode confidence but asks investors to learn a specialized visual vocabulary before screening a company.",
+      "kept": "Keep its commitment to showing evidence changes explicitly and never relying on color alone.",
+      "risk": "Hatching and overlapping sheets could obscure values and overcomplicate a first-time screen."
+    },
+    {
+      "id": "grid-specimen",
+      "kind": "challenger",
+      "catalogId": "crouwel-grid-specimen",
+      "label": "Constructed Data Grid",
+      "verdict": "declined",
+      "lineage": "modernist typographic specimens and visible construction grids",
+      "thesis": "A visible measurement grid makes quantitative evidence feel deliberate and comparable.",
+      "palette": ["#F7F7F3", "#193B4D", "#C4D4D8", "#D65B43"],
+      "materials": ["hairline construction grid", "cell-built numerals", "one accent plane"],
+      "viewport": "A familiar finance workspace uses aligned cells for criteria, values, and a labeled synthetic growth chart. One accent plane marks the active year and its related evidence. The signature move is a shared construction grid that aligns chart ticks and table columns.",
+      "case": "Declined: the grid aids quantitative comparison but contributes less to the learnability and evidence explanation the brief prioritizes.",
+      "kept": "Keep a visible, consistent alignment between chart scales and comparison tables.",
+      "risk": "A permanently visible grid can add noise and make the interface feel like a design specimen."
+    }
+  ],
+  "reroll": {
+    "registers": ["safer", "bolder"]
+  },
+  "buildPath": {
+    "value": "code",
+    "toggle": false
+  },
+  "canon": true,
+  "canonCard": {
+    "kind": "canon",
+    "label": "The category standard",
+    "thesis": "A polished, familiar finance dashboard with no deliberate outside-world reference.",
+    "palette": ["#FFFFFF", "#17212F", "#315EAA", "#E9EEF3", "#20845A"],
+    "materials": ["clean grid", "neutral panels", "standard charts and tables"],
+    "viewport": "A conventional left navigation rail and top ticker search lead to a company summary, criterion cards, a chart, tracked companies, and review actions. The visual signature is restrained use of standard finance status colors.",
+    "risk": "Familiar and easy to read, but less distinctive than a fully committed visual system.",
+    "html": ".impeccable/mocks/decision/category-standard.html",
+    "htmlFrame": "1440x900"
+  }
+}

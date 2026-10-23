@@ -1,0 +1,118 @@
+{
+  "title": "Choose the visual direction",
+  "question": "I’ve kept your dark, institutional finance-dashboard brief as the lead. Choose it, take an alternate, or re-roll.",
+  "options": [
+    {
+      "id": "institutional-research-sheet",
+      "kind": "assigned",
+      "label": "Institutional Research Sheet",
+      "kicker": "THE ROLL",
+      "lineage": "Investment-committee equity research tear sheets",
+      "thesis": "Put each screening result beside its unit, status, and data provenance.",
+      "palette": ["#0F172A", "#111C31", "#1E293B", "#E2E8F0", "#30B6FF", "#35D07F"],
+      "materials": ["charcoal data surface", "tabular numerals", "hairline grid"],
+      "viewport": "A persistent horizontal navigation, compact ticker search, screening evidence, and a Historical Comparison chart with a metric selector and LIVE or SYNTHETIC DEMO state.",
+      "risk": "Dense data can blur the difference between synthetic history and verified live evidence.",
+      "raised": [
+        {
+          "from": "Monochrome claim-and-proof pairing",
+          "raise": "Every plotted series keeps its units and LIVE or SYNTHETIC DEMO provenance in view."
+        }
+      ],
+      "html": ".impeccable/mocks/decision/institutional-research-sheet.html"
+    },
+    {
+      "id": "market-close-dispatch",
+      "kind": "pick",
+      "kicker": "IMPECCABLE’S PICK",
+      "label": "Market Close Dispatch",
+      "lineage": "Institutional market-close briefing",
+      "thesis": "Lead with the selected company’s current screen and the evidence behind it.",
+      "palette": ["#0B1220", "#182438", "#D7E1EF", "#35D07F", "#35B8FF"],
+      "materials": ["market bulletin", "quiet metadata", "tabular figures"],
+      "viewport": "A slim header and top navigation lead into a compact evidence table; a chart rail below compares one selected metric by year.",
+      "risk": "A bulletin rhythm can make monitoring history feel secondary to the latest snapshot.",
+      "html": ".impeccable/mocks/decision/market-close-dispatch.html"
+    },
+    {
+      "id": "data-lattice",
+      "kind": "challenger",
+      "catalogId": "ikeda-datamatics",
+      "label": "Data Lattice",
+      "verdict": "competitive",
+      "lineage": "High-density data-art fields",
+      "thesis": "Make annual metric movement the most legible visual in the workspace.",
+      "palette": ["#070A0F", "#F5F7FA", "#30B6FF"],
+      "materials": ["crisp rules", "tabular numerals", "fine chart lattice"],
+      "viewport": "The familiar finance workspace remains intact; fine annual markers and a restrained line grid focus attention on the selected metric.",
+      "case": "Strong investor identification through data density; less direct on the meaning and provenance of the screening evidence.",
+      "risk": "A decorative lattice can compete with the actual values.",
+      "html": ".impeccable/mocks/decision/data-lattice.html"
+    },
+    {
+      "id": "evidence-pairs",
+      "kind": "challenger",
+      "catalogId": "digital-design-canon-monochrome-product-marketing",
+      "label": "Evidence Pairs",
+      "verdict": "competitive",
+      "lineage": "Claim-and-proof product communication",
+      "thesis": "Pair every conclusion with the evidence and source that support it.",
+      "palette": ["#0F172A", "#1E293B", "#F8FAFC", "#38BDF8"],
+      "materials": ["paired data regions", "neutral surfaces", "source labels"],
+      "viewport": "Each criterion sits beside its observation and source; the history chart follows as a separate, explicitly labeled comparison.",
+      "case": "Keeps evidence close to every conclusion; its marketing-oriented pairing is less native to a dense research workflow.",
+      "risk": "Repeating labels beside every value may add unnecessary density.",
+      "html": ".impeccable/mocks/decision/evidence-pairs.html"
+    },
+    {
+      "id": "character-roster",
+      "kind": "challenger",
+      "catalogId": "pop-culture-shelf-character-goods-catalog",
+      "label": "Character Roster",
+      "verdict": "declined",
+      "lineage": "Ranked character-goods catalog",
+      "thesis": "Use a memorable roster to make demo companies easy to recognize.",
+      "palette": ["#101827", "#D9E2F0", "#6EE7B7", "#FBBF24"],
+      "materials": ["roster grid", "compact names", "state colors"],
+      "viewport": "The required finance workspace stays standard; demo fixtures appear as a scanable company list.",
+      "case": "Weak investor identification and a roster does not clarify historical financial evidence.",
+      "kept": "A short, scannable list of named demo fixtures.",
+      "risk": "Character styling would undermine the institutional research tone."
+    },
+    {
+      "id": "guide-map-legend",
+      "kind": "challenger",
+      "catalogId": "aww2-zoo-gardens-guide-map",
+      "label": "Guide-Map Legend",
+      "verdict": "declined",
+      "lineage": "Printed public-grounds guide map",
+      "thesis": "Make each metric’s status easy to locate in a clear legend.",
+      "palette": ["#0F172A", "#E2E8F0", "#30B6FF", "#35D07F", "#F5C451"],
+      "materials": ["semantic legend", "separate data layers", "clear labels"],
+      "viewport": "Standard top navigation and research panels remain in place, with a persistent legend clarifying units and data state.",
+      "case": "Its map metaphor is unfamiliar for equity screening and does not improve the required chart.",
+      "kept": "Keep a compact legend for units and LIVE, unavailable, or synthetic data.",
+      "risk": "A spatial-map metaphor could make ordinary metrics feel like locations."
+    }
+  ],
+  "reroll": {
+    "registers": ["safer", "bolder"]
+  },
+  "buildPath": {
+    "value": "code",
+    "toggle": false
+  },
+  "canon": true,
+  "canonCard": {
+    "kind": "canon",
+    "label": "Institutional Dashboard",
+    "lineage": "Modern institutional research dashboard",
+    "thesis": "Deliver the familiar dark research workspace directly, without a borrowed metaphor.",
+    "palette": ["#0F172A", "#111827", "#334155", "#F8FAFC", "#38BDF8", "#22C55E"],
+    "materials": ["dark panels", "quiet separators", "semantic data colors"],
+    "viewport": "A conventional top navigation, ticker field, criteria table, and interactive historical comparison.",
+    "risk": "The familiar category pattern needs meticulous hierarchy to avoid looking generic.",
+    "html": ".impeccable/mocks/decision/canon-dashboard.html"
+  },
+  "steer": true
+}

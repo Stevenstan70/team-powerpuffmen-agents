@@ -84,7 +84,7 @@ _DEMO_BTN_KEY = {
 
 # Form submit button key (must match app.py)
 # AppTest exposes st.form_submit_button as at.button with label matching
-_RUN_BTN_LABEL = "▶ Run basic screen"
+_RUN_BTN_LABEL = "Analyse"
 
 
 # ---------------------------------------------------------------------------
@@ -92,46 +92,32 @@ _RUN_BTN_LABEL = "▶ Run basic screen"
 # ---------------------------------------------------------------------------
 
 def _all_text(at: AppTest) -> str:
-    """Collect all rendered markdown + caption + info + warning text."""
-    parts = (
-        [m.value for m in at.markdown]
-        + [c.value for c in at.caption]
-        + [i.value for i in at.info]
-        + [w.value for w in at.warning]
+    """Collect rendered text, including headings and status messages."""
+    groups = (
+        at.title, at.header, at.subheader, at.markdown, at.caption,
+        at.info, at.warning, at.error, at.success,
     )
-    return " ".join(parts)
+    return " ".join(str(element.value) for group in groups for element in group)
 
 
 def _select_ticker(at: AppTest, ticker: str) -> AppTest:
-    """Set the ticker via the text input and wait for rerun.
-
-    NOTE: The demo shortcut buttons use st.rerun() internally which does not
-    persist session state reliably inside AppTest.  The text_input widget
-    (key="ticker_text_input") is the stable way to set the ticker in tests.
-    """
-    at.text_input(key="ticker_text_input").set_value(ticker).run()
+    """Select a synthetic company without screening or calling the agent."""
+    at.selectbox(key="demo_ticker").select(ticker).run()
+    assert not at.exception, [e.message for e in at.exception]
     return at
 
 
 def _run_screen(at: AppTest, ticker: str) -> AppTest:
-    """Select *ticker* via the text input and submit the screen form.
-
-    Replaces the old selectbox-based _run_screen helper.
-    The new app uses:
-      1. A text input (key="ticker_text_input") to set the ticker.
-      2. A st.form_submit_button to trigger the screen run.
-    For demo tickers the form fields are left blank; the adapter
-    automatically returns the named fixture.
-    """
-    # Step 1: set the ticker via text_input
+    """Run the deterministic synthetic screen, not cloud-agent analysis."""
     _select_ticker(at, ticker)
-    # Step 2: submit the form via form_submit_button
-    if not at.form_submit_button:
-        raise AssertionError(
-            f"No form_submit_button found after selecting {ticker}. "
-            f"Buttons: {[b.label for b in at.button]}"
-        )
-    at.form_submit_button[0].click().run()
+    buttons = [b for b in at.button if b.label == "Analyse"]
+    assert len(buttons) == 1, "Expected exactly one Analyse button"
+    buttons[0].click().run()
+    assert not at.exception, [e.message for e in at.exception]
+    result = at.session_state["current_eval"]
+    assert result is not None, f"No screen result for {ticker}"
+    assert result["ticker"] == ticker
+    assert at.session_state["current_analysis"] is None
     return at
 
 
@@ -140,105 +126,107 @@ def _run_screen(at: AppTest, ticker: str) -> AppTest:
 # ---------------------------------------------------------------------------
 
 class TestAppInitialRender(unittest.TestCase):
-    """The app must render cleanly without any screen having been run."""
+    """Initial render and explicit synthetic-screening workflow."""
 
     def setUp(self):
-        self.at = AppTest.from_file(APP_PATH, default_timeout=30)
-        self.at.run()
+        self.at = AppTest.from_file(APP_PATH, default_timeout=30).run()
 
     def test_no_exception_on_startup(self):
-        self.assertFalse(self.at.exception, f"App raised: {self.at.exception}")
+        self.assertFalse(self.at.exception, str(self.at.exception))
 
     def test_title_present(self):
-        titles = [t.value for t in self.at.title]
-        self.assertTrue(
-            any("Powerpuffmen Research" in t for t in titles),
-            f"Title not found. Titles: {titles}",
+        self.assertIn("InvestIQ", _all_text(self.at))
+
+    def test_research_sheet_header_and_empty_comparison_are_visible(self):
+        text = _all_text(self.at)
+        self.assertIn("Investment research, screening &amp; monitoring", text)
+        self.assertIn("Screen a company", text)
+        self.assertIn("Historical Comparison", text)
+        self.assertIn(
+            "v2_history_metric", {s.key for s in self.at.selectbox}
+        )
+        self.assertIn("No verified historical series is connected.", text)
+        self.assertIn(
+            "No chart points are generated from a single snapshot.", text
         )
 
-    def test_synthetic_data_warning_always_visible(self):
-        """A persistent prototype/session-only notice must be visible at all times.
-
-        The global banner was changed from a st.warning("SYNTHETIC DEMO DATA…")
-        to a st.info("PROTOTYPE…") so that live Moomoo runs are not mislabelled
-        as synthetic.  The per-ticker DEMO label still appears after running a
-        demo fixture (tested in TestDemoLabelInvariant and TestAcmeAllPass).
-        """
-        infos = [i.value for i in self.at.info]
-        self.assertTrue(
-            any("PROTOTYPE" in i for i in infos),
-            f"Prototype notice missing from info boxes. Infos: {infos}",
-        )
+    def test_synthetic_data_notice_visible_on_initial_screen(self):
+        text = _all_text(self.at)
+        self.assertIn("PROTOTYPE", text)
+        self.assertIn("SYNTHETIC SCREENING", text)
+        self.assertTrue(any(
+            "Quick demo screens" in c.value
+            and "fictional companies" in c.value
+            for c in self.at.caption
+        ))
 
     def test_demo_shortcut_buttons_present(self):
-        """New interface: demo shortcut buttons replace the sidebar selectbox.
+        keys = {b.key for b in self.at.button}
+        for ticker in ("ACME", "BLUE", "CRST", "SMCHG"):
+            with self.subTest(ticker=ticker):
+                self.assertIn(f"demo_{ticker.lower()}", keys)
 
-        Old assertion: selectbox exists in sidebar.
-        New assertion: keyed demo buttons are present.
-        Behavioural coverage: user can select a company to screen.
-        """
-        btn_keys = {b.key for b in self.at.button}
-        self.assertIn("demo_acme", btn_keys,
-                      f"Demo ACME button missing. Keys: {btn_keys}")
-        self.assertIn("demo_blue", btn_keys,
-                      f"Demo BLUE button missing. Keys: {btn_keys}")
-        self.assertIn("demo_crst", btn_keys,
-                      f"Demo CRST button missing. Keys: {btn_keys}")
+    def test_demo_shortcut_screens_without_requesting_agent_analysis(self):
+        from unittest.mock import patch
+        with patch("frontend.snapshot_adapter.analyse_snapshot") as agent:
+            at = AppTest.from_file(APP_PATH, default_timeout=30).run()
+            at.button(key="demo_blue").click().run()
+            self.assertFalse(at.exception, str(at.exception))
+            evaluation = at.session_state["current_eval"]
+            self.assertEqual(evaluation["ticker"], "BLUE")
+            self.assertEqual(evaluation["aggregate_status"], "fail")
+            self.assertEqual(len(evaluation["criteria"]), 4)
+            self.assertEqual(at.selectbox(key="demo_ticker").value, "BLUE")
+            self.assertIn(
+                evaluation.get("company_name") or "BLUE",
+                [h.value for h in at.subheader],
+            )
+            self.assertTrue(any(
+                "SYNTHETIC DEMO" in c.value
+                and evaluation["criteria_version"] in c.value
+                for c in at.caption
+            ))
+            self.assertIn(
+                "The deterministic screen is not an AI response.",
+                _all_text(at),
+            )
+            self.assertIsNone(at.session_state["current_analysis"])
+            self.assertEqual(
+                at.button(key="agent_analyse_btn").label,
+                "Request agent analysis",
+            )
+            agent.assert_not_called()
 
-    def test_run_button_present_after_ticker_selected(self):
-        """'▶ Run basic screen' form-submit appears once a ticker is set.
-
-        Old assertion: button[0] label contains "Run basic screen".
-        New assertion: after selecting a ticker via text_input, the
-        form_submit_button appears (AppTest exposes it via at.form_submit_button).
-        """
-        at = AppTest.from_file(APP_PATH, default_timeout=30)
-        at.run()
-        _select_ticker(at, "ACME")
-        self.assertGreater(
-            len(at.form_submit_button),
-            0,
-            "form_submit_button (▶ Run basic screen) missing after ticker set.",
+    def test_selecting_company_does_not_run_screen(self):
+        _select_ticker(self.at, "BLUE")
+        self.assertEqual(
+            len([b for b in self.at.button if b.label == "Analyse"]), 1
         )
+        self.assertIsNone(self.at.session_state["current_eval"])
+        self.assertIsNone(self.at.session_state["current_analysis"])
 
     def test_prompt_to_run_shown_before_first_run(self):
-        """Before a screen is run, a 'Press ▶ Run basic screen' prompt appears.
+        self.assertTrue(any(
+            i.value == "Choose a quick demo or select a company and press Analyse."
+            for i in self.at.info
+        ))
 
-        Old assertion: "Press" in all_text on initial render (no ticker set).
-        New assertion: same — the info box shown when no ticker is entered
-        includes this text.
-        """
-        text = _all_text(self.at)
-        self.assertIn(
-            "Press",
-            text,
-            "Expected 'Press run' prompt not found on initial render.",
-        )
+    def test_initial_screen_has_no_aggregate_result(self):
+        self.assertIsNone(self.at.session_state["current_eval"])
+        self.assertFalse(any(
+            "SYNTHETIC DEMO" in c.value for c in self.at.caption
+        ))
 
-    def test_aggregate_status_placeholder_shown(self):
-        """Before running, the aggregate status is a placeholder caption.
-
-        Old assertion: caption contains "Aggregate status" on initial render.
-        New assertion: same — the placeholder caption is shown when no ticker
-        is selected (rendered before st.stop()).
-        """
-        captions = [c.value for c in self.at.caption]
-        self.assertTrue(
-            any("Aggregate status" in c for c in captions),
-            f"Aggregate status placeholder caption not found. Captions: {captions}",
-        )
-
-    def test_ai_agent_not_connected_label(self):
-        """The AI agent not-connected label must be visible before any run.
-
-        Old assertion: caption contains "AI agent not connected" on initial render.
-        New assertion: same — the caption is rendered before st.stop() fires.
-        """
-        captions = [c.value for c in self.at.caption]
-        self.assertTrue(
-            any("AI agent not connected" in c for c in captions),
-            f"'AI agent not connected' caption missing. Captions: {captions}",
-        )
+    def test_initial_render_does_not_request_agent_analysis(self):
+        from unittest.mock import patch
+        with patch("frontend.snapshot_adapter.analyse_snapshot") as agent:
+            at = AppTest.from_file(APP_PATH, default_timeout=30).run()
+            self.assertFalse(at.exception, str(at.exception))
+            self.assertIsNone(at.session_state["current_analysis"])
+            self.assertNotIn(
+                "agent_analyse_btn", {b.key for b in at.button}
+            )
+            agent.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +244,23 @@ class TestAcmeAllPass(unittest.TestCase):
 
     def test_no_exception(self):
         self.assertFalse(self.at.exception, f"App raised: {self.at.exception}")
+
+    def test_historical_chart_metric_selector(self):
+        selector = self.at.selectbox(key="v2_history_metric")
+        self.assertEqual(list(selector.options), [
+            "Market cap \u00b7 USD",
+            "Previous close \u00b7 USD",
+            "Reported net profit \u00b7 USD; period unspecified",
+            "Snapshot trading volume \u00b7 shares; not average daily volume",
+        ])
+        self.assertIn(
+            "No verified historical series is connected.", _all_text(self.at)
+        )
+        self.assertIn(
+            "No chart points are generated from a single snapshot.",
+            _all_text(self.at),
+        )
+        self.assertEqual(len(self.at.get("vega_lite_chart")), 0)
 
     def test_pass_aggregate_in_banner(self):
         """PASS aggregate status appears in the banner.
@@ -316,45 +321,37 @@ class TestAcmeAllPass(unittest.TestCase):
                       "Criteria table missing 'Criterion' column.")
 
     def test_scope_note_present(self):
-        """A scope disclaimer is shown after running.
-
-        Old text: "Only four rules evaluated"
-        New text: "Only the criteria returned by the screening tool were evaluated."
-        Behavioural coverage: the user is told this is not a full eligibility check.
-        """
-        infos = [i.value for i in self.at.info]
-        self.assertTrue(
-            any("Only the criteria returned" in i for i in infos),
-            f"Scope note not found in info boxes. Infos: {infos}",
-        )
+        e = self.at.session_state["current_eval"]
+        self.assertTrue(e["scope_note"])
+        self.assertIn(e["scope_note"], [c.value for c in self.at.caption])
+        text = e["scope_note"].lower()
+        self.assertIn("only four screening rules", text)
+        self.assertIn("does not establish full investment eligibility", text)
+        self.assertIn("does not constitute an investment recommendation", text)
 
     def test_research_summary_present(self):
-        """The rule-based research summary is rendered.
-
-        Old assertion: "Screen result for" in all_text.
-        New assertion: identical.
-        """
-        text = _all_text(self.at)
-        self.assertIn("Screen result for", text, "Research summary not rendered.")
+        e = self.at.session_state["current_eval"]
+        self.assertEqual(e["ticker"], "ACME")
+        self.assertEqual(e["aggregate_status"], "pass")
+        self.assertIn(
+            e.get("company_name") or e["ticker"],
+            [h.value for h in self.at.subheader],
+        )
+        self.assertTrue(any(
+            "SYNTHETIC DEMO" in c.value and e["criteria_version"] in c.value
+            for c in self.at.caption
+        ))
+        self.assertEqual(len(self.at.dataframe[0].value), 4)
 
     def test_no_fabricated_content_labels(self):
-        """The disclaimer about no fabricated content must be present.
-
-        Old assertions: "no news, valuations, price history" and
-                        "no ai model was consulted".
-        New assertions: identical — these strings are preserved verbatim.
-        """
         text = _all_text(self.at)
+        self.assertIn("No verified historical series is connected.", text)
+        self.assertIn("No chart points are generated from a single snapshot.", text)
         self.assertIn(
-            "no news, valuations, price history",
-            text.lower(),
-            "Expected disclaimer about no fabricated content not found.",
+            "Net profit is not relabeled as annual or TTM", text
         )
-        self.assertIn(
-            "no ai model was consulted",
-            text.lower(),
-            "Expected 'no AI model was consulted' disclaimer not found.",
-        )
+        self.assertIn("The deterministic screen is not an AI response.", text)
+        self.assertIsNone(self.at.session_state["current_analysis"])
 
     def test_demo_label_visible(self):
         """Demo results must be visibly labelled as DEMO data."""
@@ -397,37 +394,38 @@ class TestBlueOcfFail(unittest.TestCase):
         self.assertEqual(len(df), 4)
 
     def test_ocf_criterion_shows_fail(self):
-        """The OCF criterion row shows FAIL status.
-
-        Old assertion: df["Rule"].str.contains("Operating Cash Flow")
-                       df["Status"] contains "FAIL"
-        New assertion: same logic with new column name "Criterion".
-        Behavioural coverage: the failing criterion is visibly marked.
-        """
+        e = self.at.session_state["current_eval"]
+        criteria = [
+            c for c in e["criteria"] if "net profit" in c["label"].lower()
+        ]
+        self.assertEqual(len(criteria), 1)
+        criterion = criteria[0]
         df = self.at.dataframe[0].value
-        ocf_rows = df[df["Criterion"].str.contains("Operating Cash Flow", case=False)]
-        self.assertFalse(ocf_rows.empty, "OCF criterion row not found in table.")
-        self.assertIn("FAIL", ocf_rows["Status"].values[0])
+        rows = df[df["Criterion"] == criterion["label"]]
+        self.assertEqual(len(rows), 1)
+
+        # Policy v2 replaces the old OCF fixture with reported net profit.
+        self.assertEqual(criterion["status"], "fail")
+        self.assertEqual(rows.iloc[0]["Status"], "FAIL")
+        self.assertEqual(e["aggregate_status"], "fail")
 
     def test_scope_note_present(self):
-        infos = [i.value for i in self.at.info]
-        self.assertTrue(
-            any("Only the criteria returned" in i for i in infos),
-            f"Scope note not found. Infos: {infos}",
-        )
+        e = self.at.session_state["current_eval"]
+        self.assertTrue(e["scope_note"])
+        self.assertIn(e["scope_note"], [c.value for c in self.at.caption])
+        text = e["scope_note"].lower()
+        self.assertIn("only four screening rules", text)
+        self.assertIn("does not establish full investment eligibility", text)
+        self.assertIn("does not constitute an investment recommendation", text)
 
     def test_not_investment_recommendation(self):
-        """The scope note must say this is not an investment recommendation.
-
-        Old assertion: "Not full investment eligibility" in all_text.
-        New assertion: the info box contains the same phrase.
-        """
-        text = _all_text(self.at)
-        self.assertIn(
-            "Not full investment eligibility",
-            text,
-            "Scope note does not disclaim investment recommendation.",
-        )
+        e = self.at.session_state["current_eval"]
+        self.assertTrue(e["scope_note"])
+        self.assertIn(e["scope_note"], [c.value for c in self.at.caption])
+        text = e["scope_note"].lower()
+        self.assertIn("only four screening rules", text)
+        self.assertIn("does not establish full investment eligibility", text)
+        self.assertIn("does not constitute an investment recommendation", text)
 
     def test_demo_label_visible_on_fail(self):
         """DEMO label must appear even when a criterion fails."""
@@ -451,54 +449,69 @@ class TestCrstEmployeeUnknown(unittest.TestCase):
     def test_no_exception(self):
         self.assertFalse(self.at.exception, f"App raised: {self.at.exception}")
 
-    def test_unknown_aggregate_in_banner(self):
-        """UNKNOWN aggregate status appears in the banner.
-
-        Old assertion: "UNVERIFIED" in all_text.
-        New assertion: "UNKNOWN" — the adapter maps UNVERIFIED → unknown → ⚠️ UNKNOWN.
-        Behavioural coverage: missing data produces a clearly uncertain result.
-        """
-        text = _all_text(self.at)
+    def test_missing_employee_history_stays_unknown(self):
+        import copy
+        before = copy.deepcopy(self.at.session_state["current_eval"])
+        self.at.selectbox(key="v2_history_metric").select(
+            "Reported net profit \u00b7 USD; period unspecified"
+        ).run()
+        self.assertFalse(self.at.exception, str(self.at.exception))
+        self.assertEqual(self.at.session_state["current_eval"], before)
         self.assertIn(
-            "UNKNOWN",
-            text,
-            "Expected UNKNOWN aggregate not found (was UNVERIFIED in old UI).",
+            "No chart points are generated from a single snapshot.",
+            _all_text(self.at),
         )
+        self.assertEqual(len(self.at.get("vega_lite_chart")), 0)
+        df = self.at.dataframe[0].value
+        rows = df[df["Criterion"].str.contains("net profit", case=False)]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows.iloc[0]["Observed"], "Unknown")
+
+    def test_unknown_aggregate_in_banner(self):
+        e = self.at.session_state["current_eval"]
+        self.assertEqual(e["aggregate_status"], "unknown")
+        self.assertTrue(any(
+            "SYNTHETIC DEMO" in c.value
+            and e["criteria_version"] in c.value
+            and c.value.endswith('UNVERIFIED')
+            for c in self.at.caption
+        ))
 
     def test_four_criteria_rows(self):
         df = self.at.dataframe[0].value
         self.assertEqual(len(df), 4)
 
     def test_employee_criterion_shows_unknown(self):
-        """The employee-count criterion shows UNKNOWN (not FAIL, not zero).
-
-        Old assertion: df["Rule"].contains("Employee"), status = "UNVERIFIED".
-        New assertion: df["Criterion"].contains("Employee"), status contains "UNKNOWN".
-        Behavioural coverage: missing data ≠ confirmed failure.
-        """
+        e = self.at.session_state["current_eval"]
+        criteria = [
+            c for c in e["criteria"] if "net profit" in c["label"].lower()
+        ]
+        self.assertEqual(len(criteria), 1)
+        criterion = criteria[0]
         df = self.at.dataframe[0].value
-        emp_rows = df[df["Criterion"].str.contains("Employee", case=False)]
-        self.assertFalse(emp_rows.empty, "Employee criterion row not found in table.")
-        self.assertIn(
-            "UNKNOWN",
-            emp_rows["Status"].values[0],
-            "Employee criterion must show UNKNOWN, not FAIL or empty.",
-        )
+        rows = df[df["Criterion"] == criterion["label"]]
+        self.assertEqual(len(rows), 1)
+
+        # Policy v2's missing observation is reported net profit, not employees.
+        self.assertEqual(criterion["status"], "unknown")
+        self.assertEqual(rows.iloc[0]["Status"], 'UNVERIFIED')
+        self.assertNotEqual(rows.iloc[0]["Status"], "FAIL")
 
     def test_unknown_in_employee_observed_value(self):
-        """The observed value for missing employee count shows 'Unknown'.
-
-        Old assertion: df["Observed value"] contains "Unknown".
-        New column name: "Observed".
-        Behavioural coverage: missing value is labelled Unknown, not 0.
-        """
+        e = self.at.session_state["current_eval"]
+        criteria = [
+            c for c in e["criteria"] if "net profit" in c["label"].lower()
+        ]
+        self.assertEqual(len(criteria), 1)
+        criterion = criteria[0]
         df = self.at.dataframe[0].value
-        emp_rows = df[df["Criterion"].str.contains("Employee", case=False)]
-        self.assertIn(
-            "Unknown",
-            emp_rows["Observed"].values[0],
-            "Missing employee count must show 'Unknown', not a numeric value.",
-        )
+        rows = df[df["Criterion"] == criterion["label"]]
+        self.assertEqual(len(rows), 1)
+
+        # Missing net profit must remain visibly unknown, never a displayed zero.
+        self.assertEqual(criterion["status"], "unknown")
+        self.assertEqual(criterion["observed_fmt"], "Unknown")
+        self.assertEqual(rows.iloc[0]["Observed"], "Unknown")
 
     def test_unknown_shown_in_rendered_text(self):
         """'Unknown' appears somewhere in the rendered page for missing data.
@@ -510,28 +523,22 @@ class TestCrstEmployeeUnknown(unittest.TestCase):
         self.assertIn("Unknown", text, "'Unknown' not shown for missing employee count.")
 
     def test_scope_note_present(self):
-        infos = [i.value for i in self.at.info]
-        self.assertTrue(
-            any("Only the criteria returned" in i for i in infos),
-            f"Scope note not found. Infos: {infos}",
-        )
+        e = self.at.session_state["current_eval"]
+        self.assertTrue(e["scope_note"])
+        self.assertIn(e["scope_note"], [c.value for c in self.at.caption])
+        text = e["scope_note"].lower()
+        self.assertIn("only four screening rules", text)
+        self.assertIn("does not establish full investment eligibility", text)
+        self.assertIn("does not constitute an investment recommendation", text)
 
     def test_missing_data_not_treated_as_fail(self):
-        """Aggregate with missing data must be UNKNOWN, not FAIL.
-
-        Behavioural coverage: missing metrics ≠ confirmed failure.
-        """
-        text = _all_text(self.at)
-        # UNKNOWN must be present
-        self.assertIn("UNKNOWN", text)
-        # If the only "bad" criterion is missing data, aggregate must not show pure FAIL
-        # (CRST fixture: three PASS + one UNKNOWN → aggregate UNKNOWN)
-        # Check the aggregate banner does not show ❌ FAIL
-        self.assertNotIn(
-            "❌ FAIL",
-            text,
-            "Aggregate with only missing data must not show ❌ FAIL.",
-        )
+        e = self.at.session_state["current_eval"]
+        statuses = [c["status"] for c in e["criteria"]]
+        self.assertEqual(statuses.count("pass"), 3)
+        self.assertEqual(statuses.count("unknown"), 1)
+        self.assertNotIn("fail", statuses)
+        self.assertEqual(e["aggregate_status"], "unknown")
+        self.assertNotIn("FAIL", list(self.at.dataframe[0].value["Status"]))
 
 
 # ---------------------------------------------------------------------------
@@ -548,40 +555,18 @@ class TestTickerSwitchStaleResult(unittest.TestCase):
     """
 
     def test_switching_ticker_clears_result_before_run(self):
-        """After switching to a new ticker without running, the old result
-        must not appear and the 'Press run' prompt must reappear.
-
-        Old assertion: at.selectbox[0].set_value(COMPANY_FAIL).run()
-        New assertion: click demo_blue button.
-        """
-        at = AppTest.from_file(APP_PATH, default_timeout=30)
-        at.run()
-
-        # Run ACME first — expect PASS.
-        _run_screen(at, _TICKER_PASS)
-        self.assertFalse(at.exception)
-        text_after_acme = _all_text(at)
-        self.assertIn("PASS", text_after_acme, "Sanity: ACME should show PASS.")
-
-        # Switch to BLUE — do NOT run the screen.
-        _select_ticker(at, _TICKER_FAIL)
-        self.assertFalse(at.exception, f"Exception after switch: {at.exception}")
-
-        text_after_switch = _all_text(at)
-
-        # The 'Press run' prompt must be back — ticker is set but no eval run.
+        at = AppTest.from_file(APP_PATH, default_timeout=30).run()
+        _run_screen(at, "ACME")
+        self.assertEqual(at.session_state["current_eval"]["aggregate_status"], "pass")
+        _select_ticker(at, "BLUE")
+        self.assertFalse(at.exception, str(at.exception))
+        self.assertIsNone(at.session_state["current_eval"])
+        self.assertIsNone(at.session_state["current_analysis"])
         self.assertIn(
-            "Press",
-            text_after_switch,
-            "Expected 'Press run' prompt after switching ticker without running.",
+            "Choose a quick demo or select a company and press Analyse.",
+            [i.value for i in at.info],
         )
-
-        # The criteria table must NOT be present yet.
-        self.assertEqual(
-            len(at.dataframe),
-            0,
-            "Criteria table must not be shown before running the new screen.",
-        )
+        self.assertEqual(len(at.dataframe), 0)
 
     def test_switching_then_running_shows_new_result(self):
         """After switching ticker and running, the new company's result appears.
@@ -605,28 +590,15 @@ class TestTickerSwitchStaleResult(unittest.TestCase):
         self.assertEqual(len(df), 4, "Criteria table should have 4 rows for BLUE.")
 
     def test_switching_ticker_shows_aggregate_placeholder(self):
-        """After switching to a new ticker (without running), the aggregate
-        placeholder caption must be shown — not the previous ticker's status.
-
-        Old assertion: "Aggregate status" in captions after selectbox switch.
-        New assertion: same caption check after demo-button switch.
-        """
-        at = AppTest.from_file(APP_PATH, default_timeout=30)
-        at.run()
-
-        # Run ACME to get a cached PASS result.
-        _run_screen(at, _TICKER_PASS)
-
-        # Switch to CRST — do NOT run.
-        _select_ticker(at, _TICKER_UNKNOWN)
-        self.assertFalse(at.exception)
-
-        captions = [c.value for c in at.caption]
-        self.assertTrue(
-            any("Aggregate status" in c for c in captions),
-            "Aggregate placeholder caption must reappear after switching ticker without run. "
-            f"Captions: {captions}",
-        )
+        at = AppTest.from_file(APP_PATH, default_timeout=30).run()
+        _run_screen(at, "ACME")
+        _select_ticker(at, "CRST")
+        self.assertFalse(at.exception, str(at.exception))
+        self.assertIsNone(at.session_state["current_eval"])
+        self.assertFalse(any(
+            "SYNTHETIC DEMO" in c.value for c in at.caption
+        ))
+        self.assertNotIn("agent_analyse_btn", {b.key for b in at.button})
 
     def test_acme_result_not_shown_after_switching_to_blue(self):
         """Switching from ACME to BLUE must not display ACME's criteria table.
@@ -728,14 +700,13 @@ class TestAnalysisNotConnected(unittest.TestCase):
     """
 
     def test_ai_agent_not_connected_label_before_ticker(self):
-        """Caption is visible even before a ticker is selected."""
-        at = AppTest.from_file(APP_PATH, default_timeout=30)
-        at.run()
-        captions = [c.value for c in at.caption]
-        self.assertTrue(
-            any("AI agent not connected" in c for c in captions),
-            f"'AI agent not connected' caption missing on initial render. Captions: {captions}",
-        )
+        from unittest.mock import patch
+        with patch("frontend.snapshot_adapter.analyse_snapshot") as agent:
+            at = AppTest.from_file(APP_PATH, default_timeout=30).run()
+            self.assertFalse(at.exception, str(at.exception))
+            self.assertIsNone(at.session_state["current_analysis"])
+            self.assertNotIn("agent_analyse_btn", {b.key for b in at.button})
+            agent.assert_not_called()
 
     def test_analyse_button_present_after_screen(self):
         """The agent analysis button appears after running a screen.
@@ -752,31 +723,51 @@ class TestAnalysisNotConnected(unittest.TestCase):
             f"Agent analyse button (key=agent_analyse_btn) missing. Keys: {keys}",
         )
 
-    def test_clicking_analyse_shows_error_not_fabricated_output(self):
-        """Clicking the agent analysis button shows an honest 'not connected' error.
-        No fabricated agent output is displayed.
-        """
-        at = AppTest.from_file(APP_PATH, default_timeout=30)
-        at.run()
-        _run_screen(at, _TICKER_PASS)
-        # Use key to find the correct button (not the ▶ Analyse form submit)
-        agent_btns = [b for b in at.button if b.key == "agent_analyse_btn"]
-        if not agent_btns:
-            self.skipTest("agent_analyse_btn button not found")
-        agent_btns[0].click().run()
-        self.assertFalse(at.exception, f"Exception: {at.exception}")
-        # Must show an error (st.error) — not a success with fake content
-        errors = [e.value for e in at.error]
-        self.assertTrue(
-            any("Analysis not connected" in e or "not connected" in e.lower() for e in errors),
-            f"Expected 'not connected' error after clicking agent analysis. Errors: {errors}",
-        )
-        # Must NOT claim to have agent output
-        successes = [s.value for s in at.success]
-        self.assertFalse(
-            any("Agent analysis" in s and "live agent output" in s for s in successes),
-            "App must not show fabricated agent output when not connected.",
-        )
+    def test_demo_click_shows_labeled_sample_brief_not_agent_output(self):
+        import copy
+        from unittest.mock import patch
+
+        responses = [
+            {
+                "connected": True,
+                "content": "MOCK_AGENT_RESPONSE",
+                "run_id": "mock-run",
+            },
+            {
+                "connected": False,
+                "content": None,
+                "error": "MOCK_AGENT_UNAVAILABLE",
+            },
+        ]
+        for response in responses:
+            with self.subTest(connected=response["connected"]):
+                with patch(
+                    "frontend.snapshot_adapter.analyse_snapshot",
+                    return_value=response,
+                ) as agent:
+                    at = AppTest.from_file(APP_PATH, default_timeout=30).run()
+                    at.button(key="demo_acme").click().run()
+                    self.assertFalse(at.exception, str(at.exception))
+                    agent.assert_not_called()
+                    self.assertIsNone(at.session_state["current_analysis"])
+                    evaluation = copy.deepcopy(at.session_state["current_eval"])
+                    at.button(key="agent_analyse_btn").click().run()
+                    self.assertFalse(at.exception, str(at.exception))
+                    agent.assert_called_once_with(evaluation)
+                    self.assertEqual(at.session_state["current_eval"], evaluation)
+                    self.assertEqual(at.session_state["current_analysis"], response)
+                    if response["connected"]:
+                        self.assertIn("MOCK_AGENT_RESPONSE", _all_text(at))
+                        self.assertTrue(any(
+                            "Cloud-agent response" in s.value
+                            and "synthetic inputs" in s.value
+                            for s in at.success
+                        ))
+                    else:
+                        self.assertIn(
+                            "MOCK_AGENT_UNAVAILABLE", [e.value for e in at.error]
+                        )
+                        self.assertNotIn("MOCK_AGENT_RESPONSE", _all_text(at))
 
 
 class TestCriteriaTableColumnNames(unittest.TestCase):
@@ -813,10 +804,10 @@ class TestCriteriaTableColumnNames(unittest.TestCase):
             self.assertIsInstance(val, str)
             self.assertGreater(len(val), 0)
 
-    def test_status_column_contains_icons(self):
-        """Status column values include PASS/FAIL/UNKNOWN icons."""
+    def test_status_column_contains_plain_labels(self):
+        """Status column values use clear PASS/FAIL/UNKNOWN labels."""
         self.assertIn("Status", self.df.columns)
-        valid_statuses = {"✅ PASS", "❌ FAIL", "⚠️ UNKNOWN"}
+        valid_statuses = {"PASS", "FAIL", "UNKNOWN"}
         for val in self.df["Status"]:
             self.assertIn(val, valid_statuses,
                           f"Unexpected status value: {val!r}")
@@ -832,10 +823,11 @@ class TestDemoShortcutClick(unittest.TestCase):
     """Exercise actual demo clicks, state, rendering, and provider isolation."""
 
     def _fresh(self):
-        at = AppTest.from_file(APP_PATH, default_timeout=30)
-        at.run()
+        at = AppTest.from_file(APP_PATH, default_timeout=30).run()
         self.assertFalse(at.exception, str(at.exception))
-        self.assertEqual(at.text_input(key="ticker_text_input").value, "")
+        self.assertIn(at.selectbox(key="demo_ticker").value, _DEMO_BTN_KEY)
+        self.assertIsNone(at.session_state["current_eval"])
+        self.assertIsNone(at.session_state["current_analysis"])
         return at
 
     def _click(self, at, ticker):
@@ -846,38 +838,46 @@ class TestDemoShortcutClick(unittest.TestCase):
     def _assert_result(self, at, ticker, status):
         evaluation = at.session_state["current_eval"]
         self.assertIsNotNone(evaluation)
-        self.assertEqual(at.text_input(key="ticker_text_input").value, ticker)
-        self.assertEqual(at.session_state["selected_ticker"], ticker)
+        self.assertEqual(at.selectbox(key="demo_ticker").value, ticker)
         self.assertEqual(evaluation["ticker"], ticker)
-        self.assertEqual(evaluation["mode"], "demo")
-        self.assertFalse(evaluation["is_live"])
-        self.assertIsNone(evaluation["error"])
+        self.assertFalse(evaluation.get("error"))
         self.assertEqual(evaluation["aggregate_status"], status)
         self.assertEqual(len(evaluation["criteria"]), 4)
-        self.assertGreater(len(at.dataframe), 0)
-        table = at.dataframe[0].value
+
+        tables = [
+            d.value for d in at.dataframe
+            if {"Criterion", "Observed", "Threshold", "Status"}.issubset(
+                d.value.columns
+            )
+        ]
+        self.assertEqual(len(tables), 1)
+        table = tables[0]
         self.assertEqual(len(table), 4)
-        expected_statuses = {
-            "pass": "✅ PASS", "fail": "❌ FAIL", "unknown": "⚠️ UNKNOWN"
-        }
+        labels = {'pass': 'PASS', 'fail': 'FAIL', 'unknown': 'UNVERIFIED'}
         self.assertEqual(
             list(table["Status"]),
-            [expected_statuses[c["status"]] for c in evaluation["criteria"]],
+            [labels[c["status"]] for c in evaluation["criteria"]],
+        )
+        self.assertEqual(
+            list(table["Observed"]),
+            [c["observed_fmt"] for c in evaluation["criteria"]],
         )
         self.assertTrue(any(
-            "DEMO DATA" in warning.value and "fixtures" in warning.value
-            for warning in at.warning
-        ), "Result-specific demo warning is missing")
+            "SYNTHETIC DEMO" in c.value
+            and evaluation["criteria_version"] in c.value
+            and c.value.endswith(labels[status])
+            for c in at.caption
+        ), "Result-specific synthetic label and aggregate status are missing")
         self.assertTrue(any(
-            expected_statuses[status] in element.value
-            for element in at.markdown
-        ), "Aggregate result banner is missing")
-        headings = " ".join(element.value for element in at.subheader)
-        self.assertIn(evaluation["company_name"], headings)
-        self.assertIn(ticker, headings)
+            h.value == (evaluation.get("company_name") or ticker)
+            for h in at.subheader
+        ))
+        self.assertTrue(any(
+            c.value == evaluation["scope_note"] for c in at.caption
+        ), "Scope disclaimer is missing")
         self.assertFalse(any(
-            "Enter a ticker above or pick a demo shortcut" in info.value
-            for info in at.info
+            i.value == "Choose a quick demo or select a company and press Analyse."
+            for i in at.info
         ))
 
     def test_acme_single_click(self):
@@ -918,7 +918,7 @@ class TestDemoShortcutClick(unittest.TestCase):
         self._click(at, "BLUE")
         self._assert_result(at, "BLUE", "fail")
         self.assertIsNone(at.session_state["current_analysis"])
-        self.assertEqual(at.session_state["resolved_company"]["ticker"], "BLUE")
+        self.assertEqual(at.selectbox(key="demo_ticker").value, "BLUE")
         self.assertNotIn("STALE_ACME_ANALYSIS", _all_text(at))
 
     def test_switching_shortcut_clears_existing_pending_approval(self):
@@ -953,6 +953,9 @@ class TestDemoShortcutClick(unittest.TestCase):
         with (
             patch("frontend.adapter.resolve_ticker") as resolve,
             patch("frontend.adapter.fetch_moomoo_inputs") as fetch,
+            patch("frontend.real_screen.retrieve_real_screen") as real_screen,
+            patch("frontend.market_chart.fetch_daily_candles") as candles,
+            patch("frontend.snapshot_adapter.analyse_snapshot") as agent,
         ):
             at = self._fresh()
             for ticker, status in (
@@ -966,6 +969,9 @@ class TestDemoShortcutClick(unittest.TestCase):
                     self.assertFalse(at.exception, str(at.exception))
             resolve.assert_not_called()
             fetch.assert_not_called()
+            real_screen.assert_not_called()
+            candles.assert_not_called()
+            agent.assert_not_called()
 
 
 if __name__ == "__main__":

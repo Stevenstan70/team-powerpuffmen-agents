@@ -16,7 +16,7 @@
         "ibm-watsonx-orchestrate-mcp-server"
       ],
       "env": {
-        "WXO_MCP_WORKING_DIRECTORY": "c:\\Users\\user\\AI IGNITION FOLDER\\team-powerpuffmen-agents",
+        "WXO_MCP_WORKING_DIRECTORY": "C:\\Users\\user\\AI IGNITION FOLDER\\team-powerpuffmen-agents",
         "WXO_MCP_DEBUG": ""
       },
       "timeout": 120000
