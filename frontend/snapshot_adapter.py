@@ -72,6 +72,7 @@ def evaluate_snapshot(
     source_mode="supplied",
     company_name=None,
     data_timestamp=None,
+    net_profit_evidence=None,
 ):
     """Evaluate explicitly supplied, verified-unit inputs under policy v2."""
     result = {
@@ -105,6 +106,45 @@ def evaluate_snapshot(
                 + ", ".join(sorted(map(str, unexpected)))
             )
 
+        verified_profit = None
+        if net_profit_evidence is not None:
+            from frontend.statement_evidence import extract_net_profit_evidence
+
+            evidence = net_profit_evidence
+            if source_mode == "demo":
+                raise ValueError("Statement evidence cannot be attached to demo inputs.")
+            if not isinstance(evidence, dict):
+                raise ValueError("Statement evidence must be a dictionary.")
+            if evidence.get("source") != "moomoo.get_financials_statements":
+                raise ValueError("Unexpected statement evidence source.")
+            expected_code = "US." + ticker.strip().upper()
+            if evidence.get("requested_code") != expected_code:
+                raise ValueError("Statement evidence security does not match ticker.")
+            if evidence.get("field_id") != 8037:
+                raise ValueError("Statement evidence must use Net Profit field 8037.")
+
+            verified_profit = extract_net_profit_evidence({
+                "next_key": evidence.get("next_key"),
+                "report_list": [{
+                    "date_time_str": evidence.get("report_end"),
+                    "fiscal_year": evidence.get("fiscal_year"),
+                    "financial_type": evidence.get("financial_type"),
+                    "period_text": evidence.get("period_text"),
+                    "currency_code": evidence.get("currency_code"),
+                    "accounting_standards": evidence.get("accounting_standards"),
+                    "item_list": [{
+                        "field_id": evidence.get("field_id"),
+                        "display_name": evidence.get("provider_label"),
+                        "data": evidence.get("value"),
+                    }],
+                }],
+            }, expected_code)
+            supplied_profit = inputs.get("net_profit_usd")
+            if supplied_profit is None or isinstance(supplied_profit, bool):
+                raise ValueError("Explicit net-profit input is required with evidence.")
+            if supplied_profit != verified_profit["value"]:
+                raise ValueError("Net-profit input does not match statement evidence.")
+
         raw = _screen(**{key: inputs.get(key) for key in INPUT_KEYS})
         rules = raw["rules"]
 
@@ -132,6 +172,36 @@ def evaluate_snapshot(
                 "status": status_map[rule["status"]],
                 "explanation": rule["explanation"],
             })
+
+        if verified_profit is not None:
+            profit_rows = [
+                c for c in criteria if "net profit" in c["label"].lower()
+            ]
+            if len(profit_rows) != 1:
+                raise ValueError("Net-profit criterion not uniquely identified.")
+            period = (
+                verified_profit["period_text"]
+                + " (report end " + verified_profit["report_end"] + ")"
+                + "; most recent returned report"
+            )
+            profit_rows[0]["reporting_period"] = period
+            profit_rows[0]["provenance"] = verified_profit
+            profit_rows[0]["explanation"] += (
+                " Source: Moomoo statement field 8037 in USD; " + period + "."
+                + " This is not an inferred annual or TTM amount."
+            )
+            old_note = (
+                "Net profit is provider-reported; "
+                "its reporting period is unspecified."
+            )
+            if old_note not in result["scope_note"]:
+                raise ValueError("Expected net-profit scope wording not found.")
+            result["scope_note"] = result["scope_note"].replace(
+                old_note,
+                "Net profit is provider-reported in USD for " + period
+                + "; it is not relabeled as annual or TTM.",
+                1,
+            )
 
         result.update(
             company_name=company_name or ticker,

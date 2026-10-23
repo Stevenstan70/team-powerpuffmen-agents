@@ -1,4 +1,4 @@
-﻿"""Real-company evidence and partial snapshot-policy evaluation."""
+"""Real-company evidence and partial snapshot-policy evaluation."""
 from datetime import datetime, timezone
 import math
 import re
@@ -9,7 +9,7 @@ import streamlit as st
 from frontend.snapshot_adapter import evaluate_snapshot
 
 
-def retrieve_real_screen(ticker):
+def retrieve_real_screen(ticker, *, include_statement_profit=False):
     import moomoo as mm
 
     ticker = ticker.strip().upper()
@@ -65,10 +65,27 @@ def retrieve_real_screen(ticker):
         if not math.isfinite(volume) or volume < 0 or not volume.is_integer():
             raise ValueError("Snapshot volume is not a nonnegative share count.")
 
+        statement_evidence = None
+        if include_statement_profit:
+            from frontend.statement_evidence import extract_net_profit_evidence
+
+            ret, statement_payload = ctx.get_financials_statements(code=code)
+            if ret != mm.RET_OK:
+                raise RuntimeError(
+                    f"Financial-statement retrieval failed: {statement_payload}"
+                )
+            statement_evidence = extract_net_profit_evidence(
+                statement_payload, code
+            )
+
         inputs = {
             "market_cap_usd": None,
             "close_price_usd": None,
-            "net_profit_usd": None,
+            "net_profit_usd": (
+                statement_evidence["value"]
+                if statement_evidence is not None
+                else None
+            ),
             "snapshot_volume_shares": int(volume),
         }
         evaluation = evaluate_snapshot(
@@ -77,6 +94,11 @@ def retrieve_real_screen(ticker):
             source_mode="supplied",
             company_name=str(exact.iloc[0]["name"]),
             data_timestamp=str(timestamp),
+            **(
+                {"net_profit_evidence": statement_evidence}
+                if statement_evidence is not None
+                else {}
+            ),
         )
         if evaluation.get("error"):
             raise ValueError(evaluation["error"])
@@ -93,6 +115,18 @@ def retrieve_real_screen(ticker):
                     "Evaluated as snapshot shares"
                     if field == "volume"
                     else "Not evaluated: USD mapping unverified"
+                ),
+            })
+
+        if statement_evidence is not None:
+            raw.append({
+                "Provider field": "financial statements: field 8037",
+                "Raw value": str(statement_evidence["value"]),
+                "Use": (
+                    "Evaluated as USD net profit for "
+                    + statement_evidence["period_text"]
+                    + " (report end " + statement_evidence["report_end"] + "); "
+                    + "most recent returned report, not inferred annual or TTM"
                 ),
             })
 
@@ -123,11 +157,30 @@ def render_real_screen():
         key="real_screen_ticker",
         on_change=clear_result,
     )
+    include_statements = st.checkbox(
+        "Include statement-reported USD net profit",
+        value=False,
+        key="real_screen_statements",
+        on_change=clear_result,
+        help=(
+            "Requests financial statements in addition to the snapshot. "
+            "Uses the most recent report in the returned response; "
+            "does not infer annual or TTM profit. "
+            "Retrieval or validation failures stop this request."
+        ),
+    )
     if st.button("Retrieve real-company screen", key="real_screen_load"):
         clear_result()
         try:
-            with st.spinner("Verifying stock and retrieving its snapshot..."):
-                st.session_state["real_screen_result"] = retrieve_real_screen(ticker)
+            with st.spinner("Verifying stock and retrieving selected evidence..."):
+                st.session_state["real_screen_result"] = retrieve_real_screen(
+                    ticker,
+                    **(
+                        {"include_statement_profit": True}
+                        if include_statements
+                        else {}
+                    ),
+                )
         except Exception as exc:
             st.session_state["real_screen_error"] = str(exc)
 
@@ -142,12 +195,13 @@ def render_real_screen():
     e = result["evaluation"]
     st.subheader(f"{e['company_name']} ({result['code']})")
     st.warning(
-        "INCOMPLETE SCREEN: monetary criteria remain unverified. "
+        "INCOMPLETE SCREEN: some criteria remain unverified. "
         "Real-data screening and agent analysis are blocked from a complete "
         "decision pending currency, units, and provider-validity verification."
     )
     st.caption(
-        f"Provider snapshot: {e['data_timestamp']} (US Eastern; not converted). "
+        f"Provider snapshot: {e['data_timestamp']} "
+        "(provider timestamp; timezone not independently verified). "
         f"Retrieved at: {result['fetched_at']}. Not a streaming feed."
     )
     labels = {"pass": "PASS", "fail": "FAIL", "unknown": "UNVERIFIED"}
@@ -167,6 +221,11 @@ def render_real_screen():
     )
     with st.expander("Raw provider evidence", expanded=True):
         st.dataframe(result["raw"], hide_index=True, width="stretch")
+        for criterion in e["criteria"]:
+            provenance = criterion.get("provenance")
+            if provenance is not None:
+                st.caption("Statement provenance: " + criterion["label"])
+                st.json(provenance)
     st.caption(e["scope_note"])
     st.info(
         "Real-company cloud-agent analysis and monitoring are not enabled here. "
