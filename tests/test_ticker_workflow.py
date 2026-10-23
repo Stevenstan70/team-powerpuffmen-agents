@@ -848,94 +848,96 @@ class TestExplicitDemoSelection(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 def _all_text(at):
-    collections = (
-        at.markdown,
-        at.caption,
-        at.info,
-        at.warning,
-        at.error,
-        at.success,
+    groups = (
+        at.title, at.header, at.subheader, at.markdown, at.caption,
+        at.info, at.warning, at.error, at.success,
     )
-
-    return " ".join(
-        str(element.value)
-        for collection in collections
-        for element in collection
-    )
+    return " ".join(str(e.value) for group in groups for e in group)
 
 
 def _new_app():
     from streamlit.testing.v1 import AppTest
-
-    at = AppTest.from_file(APP_PATH, default_timeout=30)
-    at.run()
+    at = AppTest.from_file(APP_PATH, default_timeout=30).run()
+    assert not at.exception, [e.message for e in at.exception]
     return at
 
 
 def _set_ticker(at, ticker):
-    at.text_input(key="ticker_text_input").set_value(ticker).run()
+    """Select a synthetic company without evaluating it."""
+    at.selectbox(key="demo_ticker").select(ticker).run()
+    assert not at.exception, [e.message for e in at.exception]
     return at
 
 
 def _run_demo(ticker):
-    # Demo routes must not accidentally depend on live OpenD.
     with (
-        patch("frontend.adapter._MOOMOO_AVAILABLE", False),
-        patch("frontend.adapter._ft") as mock_ft,
+        patch("frontend.adapter._ft") as legacy,
+        patch("frontend.real_screen.retrieve_real_screen") as real,
+        patch("frontend.market_chart.fetch_daily_candles") as candles,
+        patch("frontend.snapshot_adapter.analyse_snapshot") as agent,
     ):
         at = _new_app()
         _set_ticker(at, ticker)
+        buttons = [b for b in at.button if b.label == "Analyse"]
+        assert len(buttons) == 1
+        buttons[0].click().run()
+        assert not at.exception, [e.message for e in at.exception]
+        assert at.session_state["current_eval"]["ticker"] == ticker
+        assert at.session_state["current_analysis"] is None
+        legacy.OpenQuoteContext.assert_not_called()
+        real.assert_not_called()
+        candles.assert_not_called()
+        agent.assert_not_called()
+    return at
 
-        if len(at.form_submit_button) == 0:
-            raise AssertionError(
-                "Expected an Analyse submit button after setting "
-                f"demo ticker {ticker!r}."
-            )
 
-        at.form_submit_button[0].click().run()
-        mock_ft.OpenQuoteContext.assert_not_called()
+def _reject_real_ticker(at, raw):
+    """Exercise actual syntax validation without importing the real SDK."""
+    from types import ModuleType
+    from unittest.mock import MagicMock
 
+    fake = ModuleType("moomoo")
+    fake.OpenQuoteContext = MagicMock(
+        side_effect=AssertionError("Invalid symbol attempted a connection")
+    )
+    with (
+        patch.dict(sys.modules, {"moomoo": fake}),
+        patch("frontend.snapshot_adapter.analyse_snapshot") as agent,
+        patch("frontend.market_chart.fetch_daily_candles") as candles,
+    ):
+        radios = [r for r in at.radio if r.label == "Input source"]
+        assert len(radios) == 1
+        radios[0].set_value(radios[0].options[1]).run()
+        assert not at.exception, [e.message for e in at.exception]
+        at.text_input(key="real_screen_ticker").set_value(raw).run()
+        assert not at.exception, [e.message for e in at.exception]
+        at.button(key="real_screen_load").click().run()
+        assert not at.exception, [e.message for e in at.exception]
+        fake.OpenQuoteContext.assert_not_called()
+        agent.assert_not_called()
+        candles.assert_not_called()
     return at
 
 
 class TestInvalidTickerRejected(unittest.TestCase):
     def _render_with_ticker(self, raw):
-        with (
-            patch("frontend.adapter._MOOMOO_AVAILABLE", False),
-            patch("frontend.adapter._ft") as mock_ft,
-        ):
-            at = _new_app()
-            _set_ticker(at, raw)
-            mock_ft.OpenQuoteContext.assert_not_called()
-
-        self.assertFalse(at.exception, f"App raised: {at.exception}")
+        at = _reject_real_ticker(_new_app(), raw)
+        self.assertIsNone(at.session_state.get("real_screen_result"))
+        self.assertIn(
+            "Enter an exact US ticker, for example AAPL.",
+            [e.value for e in at.error],
+        )
         return at
 
     def test_multi_word_input_shows_error(self):
-        at = self._render_with_ticker("baba amskd")
-        errors = [str(e.value) for e in at.error]
-
-        self.assertTrue(
-            any(
-                "invalid ticker" in error.lower()
-                or "multiple words" in error.lower()
-                for error in errors
-            ),
-            f"Expected invalid-ticker error. Errors: {errors}",
-        )
+        self._render_with_ticker("baba amskd")
 
     def test_multi_word_input_not_shown_as_heading(self):
         at = self._render_with_ticker("baba amskd")
-        subtitles = [str(s.value) for s in at.subheader]
-
-        self.assertFalse(
-            any(
-                "baba" in subtitle.lower()
-                and "amskd" in subtitle.lower()
-                for subtitle in subtitles
-            ),
-            f"Unverified company heading: {subtitles}",
-        )
+        self.assertFalse(any(
+            "baba" in h.value.lower() and "amskd" in h.value.lower()
+            for h in at.subheader
+        ))
 
     def test_multi_word_input_no_dataframe(self):
         at = self._render_with_ticker("baba amskd")
@@ -943,31 +945,21 @@ class TestInvalidTickerRejected(unittest.TestCase):
 
     def test_too_long_ticker_shows_error(self):
         at = self._render_with_ticker("ABCDEFGHIJK")
-        self.assertGreater(
-            len(at.error),
-            0,
-            "Expected a format error for an overlong ticker.",
-        )
         self.assertEqual(len(at.dataframe), 0)
 
 
 class TestAnalyseButtonReplacesManualForm(unittest.TestCase):
     def setUp(self):
-        with patch("frontend.adapter._MOOMOO_AVAILABLE", False):
-            self.at = _new_app()
-            _set_ticker(self.at, "ACME")
-
-        self.assertFalse(
-            self.at.exception,
-            f"App raised: {self.at.exception}",
-        )
+        self.at = _new_app()
+        _set_ticker(self.at, "ACME")
 
     def _assert_no_manual_label(self, label):
-        text_labels = [item.label for item in self.at.text_input]
-        number_labels = [item.label for item in self.at.number_input]
-
-        self.assertNotIn(label, text_labels)
-        self.assertNotIn(label, number_labels)
+        labels = (
+            [w.label for w in self.at.text_input]
+            + [w.label for w in self.at.number_input]
+        )
+        self.assertNotIn(label, labels)
+        self.assertEqual(len(self.at.number_input), 0)
 
     def test_no_market_cap_input_field(self):
         self._assert_no_manual_label("Market Cap (USD)")
@@ -975,140 +967,136 @@ class TestAnalyseButtonReplacesManualForm(unittest.TestCase):
     def test_no_close_price_input_field(self):
         self._assert_no_manual_label("Close Price (USD)")
 
-    def test_no_ocf_input_field(self):
-        self._assert_no_manual_label("Operating Cash Flow TTM (USD)")
+    def test_no_net_profit_input_field(self):
+        self._assert_no_manual_label("Net Profit (USD)")
 
-    def test_no_employee_count_input_field(self):
-        self._assert_no_manual_label("Employee Count")
+    def test_no_snapshot_volume_input_field(self):
+        self._assert_no_manual_label("Snapshot Volume (shares)")
 
-    def test_analyse_form_submit_present(self):
-        self.assertGreater(
-            len(self.at.form_submit_button),
-            0,
-            "Analyse form submit button missing.",
+    def test_screen_button_present_without_running_analysis(self):
+        self.assertEqual(
+            len([b for b in self.at.button if b.label == "Analyse"]), 1
+        )
+        self.assertIsNone(self.at.session_state["current_eval"])
+        self.assertIsNone(self.at.session_state["current_analysis"])
+        self.assertNotIn(
+            "agent_analyse_btn", {b.key for b in self.at.button}
         )
 
 
 class TestDemoAnalyseFlow(unittest.TestCase):
     def test_acme_analyse_shows_results(self):
         at = _run_demo("ACME")
-        self.assertFalse(at.exception, f"App raised: {at.exception}")
-        self.assertGreater(len(at.dataframe), 0)
+        self.assertEqual(len(at.dataframe[0].value), 4)
 
-    def test_acme_company_name_shown_after_resolve(self):
+    def test_acme_company_name_shown_after_screen(self):
         at = _run_demo("ACME")
-        self.assertFalse(at.exception)
-        subtitles = [str(s.value) for s in at.subheader]
-
-        self.assertTrue(
-            any(
-                "ACME" in subtitle or "Acme" in subtitle
-                for subtitle in subtitles
-            ),
-            f"Company name missing: {subtitles}",
+        e = at.session_state["current_eval"]
+        self.assertIn(
+            e.get("company_name") or "ACME",
+            [h.value for h in at.subheader],
         )
 
     def test_demo_label_visible(self):
         at = _run_demo("ACME")
-        self.assertFalse(at.exception)
-        self.assertIn("DEMO", _all_text(at).upper())
+        e = at.session_state["current_eval"]
+        self.assertTrue(any(
+            "SYNTHETIC DEMO" in c.value
+            and e["criteria_version"] in c.value
+            for c in at.caption
+        ))
 
     def test_pass_result_for_acme(self):
         at = _run_demo("ACME")
-        self.assertFalse(at.exception)
-        self.assertIn("PASS", _all_text(at))
+        self.assertEqual(
+            at.session_state["current_eval"]["aggregate_status"], "pass"
+        )
+        self.assertTrue(any(
+            "SYNTHETIC DEMO" in c.value and c.value.endswith("PASS")
+            for c in at.caption
+        ))
 
     def test_fail_result_for_blue(self):
         at = _run_demo("BLUE")
-        self.assertFalse(at.exception)
-        self.assertIn("FAIL", _all_text(at))
+        self.assertEqual(
+            at.session_state["current_eval"]["aggregate_status"], "fail"
+        )
+        self.assertTrue(any(
+            "SYNTHETIC DEMO" in c.value and c.value.endswith("FAIL")
+            for c in at.caption
+        ))
 
     def test_unknown_for_crst(self):
         at = _run_demo("CRST")
-        self.assertFalse(at.exception)
-        self.assertIn("UNKNOWN", _all_text(at))
+        self.assertEqual(
+            at.session_state["current_eval"]["aggregate_status"], "unknown"
+        )
+        self.assertTrue(any(
+            "SYNTHETIC DEMO" in c.value
+            and c.value.endswith("UNVERIFIED")
+            for c in at.caption
+        ))
 
     def test_scope_note_present(self):
         at = _run_demo("ACME")
-        self.assertFalse(at.exception)
-        self.assertIn(
-            "Only the criteria returned",
-            _all_text(at),
-        )
+        scope = at.session_state["current_eval"]["scope_note"]
+        self.assertIn(scope, [c.value for c in at.caption])
+        self.assertIn("Only four screening rules", scope)
 
     def test_not_investment_recommendation(self):
         at = _run_demo("BLUE")
-        self.assertFalse(at.exception)
-        self.assertIn(
-            "Not full investment eligibility",
-            _all_text(at),
-        )
+        text = _all_text(at).lower()
+        self.assertIn("does not establish full investment eligibility", text)
+        self.assertIn("does not constitute an investment recommendation", text)
 
 
 class TestMissingMetricDisplay(unittest.TestCase):
-    def test_missing_employee_value_shows_unknown_not_zero(self):
-        # CRST has missing employees, not missing cash flow.
+    def test_missing_net_profit_shows_unknown_not_zero(self):
         at = _run_demo("CRST")
-        self.assertFalse(at.exception)
-        self.assertGreater(len(at.dataframe), 0)
-
-        frame = at.dataframe[0].value
-        self.assertIn("Criterion", frame.columns)
-        self.assertIn("Observed", frame.columns)
-
-        employee_rows = frame[
-            frame["Criterion"]
-            .astype(str)
-            .str.contains("Employee", case=False, na=False)
+        e = at.session_state["current_eval"]
+        criteria = [
+            c for c in e["criteria"] if "net profit" in c["label"].lower()
         ]
-
-        self.assertFalse(employee_rows.empty)
-
-        observed = str(employee_rows.iloc[0]["Observed"])
-        self.assertIn("unknown", observed.lower())
-        self.assertNotIn(observed, ("0", "0.0", "$0.00"))
+        self.assertEqual(len(criteria), 1)
+        self.assertEqual(criteria[0]["status"], "unknown")
+        frame = at.dataframe[0].value
+        rows = frame[frame["Criterion"] == criteria[0]["label"]]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows.iloc[0]["Observed"], "Unknown")
+        self.assertEqual(rows.iloc[0]["Status"], "UNVERIFIED")
 
 
 class TestSwitchTickerClearsAnalysis(unittest.TestCase):
-    def test_switch_clears_company_heading(self):
-        with patch("frontend.adapter._MOOMOO_AVAILABLE", False):
-            at = _run_demo("ACME")
-            self.assertFalse(at.exception)
-            self.assertGreater(len(at.dataframe), 0)
+    def test_switch_clears_company_heading_and_analysis(self):
+        at = _run_demo("ACME")
+        old_name = at.session_state["current_eval"]["company_name"]
+        at.session_state["current_analysis"] = {
+            "connected": True, "content": "STALE_ANALYSIS_MARKER",
+        }
+        _set_ticker(at, "BLUE")
+        self.assertEqual(len(at.dataframe), 0)
+        self.assertIsNone(at.session_state["current_eval"])
+        self.assertIsNone(at.session_state["current_analysis"])
+        self.assertNotIn(old_name, [h.value for h in at.subheader])
+        self.assertNotIn("STALE_ANALYSIS_MARKER", _all_text(at))
 
-            _set_ticker(at, "BLUE")
-
-        self.assertFalse(at.exception)
-        self.assertEqual(
-            len(at.dataframe),
-            0,
-            "ACME results must not remain after switching to BLUE.",
+    def test_invalid_real_input_does_not_display_synthetic_result(self):
+        at = _run_demo("ACME")
+        old_name = at.session_state["current_eval"]["company_name"]
+        at = _reject_real_ticker(at, "hello world")
+        self.assertIn(
+            "Enter an exact US ticker, for example AAPL.",
+            [e.value for e in at.error],
         )
-
-    def test_switch_to_invalid_shows_error_not_stale_result(self):
-        with patch("frontend.adapter._MOOMOO_AVAILABLE", False):
-            at = _run_demo("ACME")
-            self.assertFalse(at.exception)
-            self.assertGreater(len(at.dataframe), 0)
-
-            _set_ticker(at, "hello world")
-
-        self.assertFalse(at.exception)
-        errors = [str(e.value) for e in at.error]
-
-        self.assertTrue(
-            any(
-                "invalid ticker" in error.lower()
-                or "multiple words" in error.lower()
-                for error in errors
-            ),
-            f"Expected invalid-ticker error. Errors: {errors}",
+        self.assertIsNone(at.session_state.get("real_screen_result"))
+        self.assertEqual(len(at.dataframe), 0)
+        self.assertNotIn(old_name, [h.value for h in at.subheader])
+        self.assertNotIn(
+            "agent_analyse_btn", {b.key for b in at.button}
         )
-        self.assertEqual(
-            len(at.dataframe),
-            0,
-            "Stale criteria must not remain for invalid input.",
-        )
+        self.assertFalse(any(
+            "SYNTHETIC DEMO" in c.value for c in at.caption
+        ))
 
 
 if __name__ == "__main__":
